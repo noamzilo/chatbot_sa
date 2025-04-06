@@ -1,0 +1,14 @@
+AWS console
+https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#Overview:
+
+My IP (change in firewall from cafe)
+curl https://checkip.amazonaws.com
+
+SSH to ec2 (IP non static):
+ssh -i ~/src/chatbot_sa/creds/aws/chatbot_sa_key.pem ubuntu@52.91.192.92
+
+Check EC2 instance aliave
+aws ec2 describe-instances --query "Reservations[*].Instances[*].{ID:InstanceId,State:State.Name}" --output table
+
+Start EC2 instance
+aws ec2 start-instances --instance-ids i-0adeaebf9f64d7233
