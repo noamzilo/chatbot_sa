@@ -11,4 +11,4 @@ Check EC2 instance aliave
 aws ec2 describe-instances --query "Reservations[*].Instances[*].{ID:InstanceId,State:State.Name}" --output table
 
 Start EC2 instance
-aws ec2 start-instances --instance-ids i-0adeaebf9f64d7233
+aws ec2 start-instances --instance-ids i-0adeaebf9f64d7233  
