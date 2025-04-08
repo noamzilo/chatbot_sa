@@ -1,33 +1,54 @@
-name: Deploy Telegram Bot
+name: Local Deploy with act (ECR + EC2)
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
 
     steps:
-      - name: Checkout code
+      - name: Check out the code
         uses: actions/checkout@v3
 
-      - name: Set up SSH
-        run: |
-          echo "$EC2_SSH_KEY" > key.pem
-          chmod 600 key.pem
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Deploy to EC2 via SSH
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      - name: Set image tag
+        id: vars
+        run: echo "IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Amazon ECR
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem $EC2_USER@$EC2_HOST << 'EOF'
-            set -e
-            cd ~/chatbot_sa
-            echo "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN" > .secrets/.env
-            docker-compose down
-            docker-compose up -d --build
+          aws ecr get-login-password | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
+
+      - name: Pull existing image (if any) for cache
+        continue-on-error: true
+        run: |
+          docker pull ${{ steps.vars.outputs.IMAGE }}
+
+      - name: Build and push Docker image to ECR (optimized)
+        uses: docker/build-push-action@v3
+        with:
+          context: ./bot
+          push: true
+          tags: ${{ steps.vars.outputs.IMAGE }}
+          cache-from: type=registry,ref=${{ steps.vars.outputs.IMAGE }}
+          cache-to: type=inline
+
+      - name: Decode EC2 SSH Key
+        run: |
+          echo "${{ secrets.EC2_SSH_KEY_B64 }}" | base64 -d > /tmp/chatbot_sa_key.pem
+          chmod 600 /tmp/chatbot_sa_key.pem
+
+      - name: Deploy to EC2
+        run: |
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} <<EOF
+            cd /home/ubuntu/src/chatbot_sa
+            docker-compose pull telegram_bot
+            docker-compose up -d telegram_bot
           EOF

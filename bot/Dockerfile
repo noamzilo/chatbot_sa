@@ -1,10 +1,31 @@
-FROM python:3.11-slim
+FROM	python:3.12-slim
 
-WORKDIR /app
+ENV	POETRY_VERSION=1.1.12
 
-COPY pyproject.toml .
-RUN pip install poetry && poetry config virtualenvs.create false && poetry install
+# Install system packages including SSH server
+RUN	apt-get update && \
+	apt-get install -y curl openssh-server && \
+	rm -rf /var/lib/apt/lists/*
 
-COPY . .
+# Set up Poetry
+RUN	pip install --no-cache-dir "poetry==${POETRY_VERSION}"
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5000"]
+# Prepare SSH server
+RUN	mkdir /var/run/sshd
+RUN	sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+
+WORKDIR	/bot
+
+# Copy only the Poetry config first for caching
+COPY	pyproject.toml	./
+RUN	poetry install --no-interaction --no-ansi
+
+# Now copy the rest of the code
+COPY	.	.
+
+# Copy entrypoint
+RUN	chmod +x /bot/entrypoint.sh
+
+EXPOSE	22
+
+ENTRYPOINT	["/bot/entrypoint.sh"]
