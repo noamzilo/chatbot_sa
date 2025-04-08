@@ -24,6 +24,10 @@ jobs:
 
       - name: Log in to Amazon ECR
         run: |
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip > /dev/null
+          sudo ./aws/install
+          aws --version
           aws ecr get-login-password | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
 
       - name: Pull existing image (if any) for cache

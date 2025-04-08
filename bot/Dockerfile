@@ -1,31 +1,38 @@
-FROM	python:3.12-slim
+FROM python:3.12-slim
 
-ENV	POETRY_VERSION=1.1.12
+# Install dependencies including SSH server
+RUN apt-get update && apt-get install -y \
+	openssh-server \
+	build-essential \
+	&& rm -rf /var/lib/apt/lists/*
 
-# Install system packages including SSH server
-RUN	apt-get update && \
-	apt-get install -y curl openssh-server && \
-	rm -rf /var/lib/apt/lists/*
+# Create SSH directory and set a password for root (optional for debugging, should be disabled in prod)
+RUN mkdir /var/run/sshd && \
+	echo 'root:root' | chpasswd
+
+# Allow root login over SSH (optional and insecure for production, use with caution)
+RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
 
 # Set up Poetry
-RUN	pip install --no-cache-dir "poetry==${POETRY_VERSION}"
+ENV POETRY_VERSION=1.1.12
+RUN pip install "poetry==$POETRY_VERSION"
 
-# Prepare SSH server
-RUN	mkdir /var/run/sshd
-RUN	sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+# Set workdir
+WORKDIR /app
 
-WORKDIR	/bot
+# Copy poetry files and install dependencies
+COPY pyproject.toml poetry.lock ./
+RUN poetry install --no-root
 
-# Copy only the Poetry config first for caching
-COPY	pyproject.toml	./
-RUN	poetry install --no-interaction --no-ansi
+# Copy the rest of the app
+COPY . .
 
-# Now copy the rest of the code
-COPY	.	.
+# Copy the entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# Copy entrypoint
-RUN	chmod +x /bot/entrypoint.sh
+# Expose SSH port
+EXPOSE 22
 
-EXPOSE	22
-
-ENTRYPOINT	["/bot/entrypoint.sh"]
+# Use the entrypoint
+ENTRYPOINT ["/entrypoint.sh"]

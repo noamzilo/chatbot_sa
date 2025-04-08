@@ -1,5 +1,7 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
-# Start SSH server in the foreground
+# Start the SSH service
 service ssh start
-tail -f /dev/null
+
+# Start the app (FastAPI/uvicorn or whatever your main command is)
+exec poetry run python -m chatbot_sa.telegram_bot
