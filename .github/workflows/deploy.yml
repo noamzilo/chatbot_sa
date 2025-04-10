@@ -71,4 +71,4 @@ jobs:
         run: |
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "cd /home/${{ secrets.EC2_USER }}/chatbot_sa && docker-compose pull && docker-compose up -d"
+            "aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }} && cd /home/${{ secrets.EC2_USER }}/chatbot_sa && docker-compose pull && docker-compose up -d"
