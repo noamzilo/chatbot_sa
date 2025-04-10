@@ -2,10 +2,14 @@ version: "3.8"
 
 services:
   bot:
+    build:
+      context: ./bot
+      dockerfile: Dockerfile
     image: ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
     container_name: chatbot_sa_bot
     volumes:
-      - /home/ubuntu/.ssh/github_deploy:/root/.ssh/id_ed25519:ro
+      - ${SSH_KEY_PATH:-/home/ubuntu/.ssh/github_deploy}:/root/.ssh/id_ed25519:ro
     environment:
       - GIT_SSH_COMMAND=ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
     restart: unless-stopped

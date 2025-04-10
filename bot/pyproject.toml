@@ -10,6 +10,7 @@ packages = [{include = "chatbot_sa"}]
 python = "^3.12"
 fastapi = "^0.110.0"
 six = "^1.17.0"
+python-telegram-bot = "^20.8"
 
 [build-system]
 requires = ["poetry-core"]

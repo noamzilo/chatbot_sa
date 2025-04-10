@@ -4,4 +4,4 @@
 service ssh start
 
 # Start the bot directly
-exec poetry run python telegram_bot/bot.py
+exec poetry run python main.py

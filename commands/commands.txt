@@ -15,13 +15,16 @@ aws ec2 start-instances --instance-ids i-0adeaebf9f64d7233
 
 docker build
 cd bot
-docker build -t chatbot_sa_bot .
+docker build -t chatbot_sa_bot bot/
 
 docker run
 docker run --rm -it \
 	--env-file /home/noams/src/chatbot_sa/.secrets/.env \
 	--name chatbot_sa_bot \
 	chatbot_sa_bot
+
+docker compose
+docker-compose --env-file .secrets/.env up --build
 
 run act
 act -j deploy --secret-file /home/noams/src/chatbot_sa/.secrets/.env
