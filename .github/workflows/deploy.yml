@@ -1,6 +1,9 @@
-name: Local Deploy with act (ECR + EC2)
+name: Deploy to EC2 via ECR
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -8,7 +11,7 @@ jobs:
     runs-on: ubuntu-20.04
 
     steps:
-      - name: Check out the code
+      - name: Check out code
         uses: actions/checkout@v3
 
       - name: Configure AWS credentials
@@ -18,45 +21,38 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Set image tag
-        id: vars
-        run: echo "IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest" >> "$GITHUB_OUTPUT"
-
       - name: Log in to Amazon ECR
         run: |
-          curl -sSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
-          unzip awscliv2.zip >/dev/null
-          sudo ./aws/install
-          aws --version
           aws ecr get-login-password | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
 
-      - name: Pull existing image (if any) for cache
-        continue-on-error: true
-        run: |
-          docker pull ${{ steps.vars.outputs.IMAGE }}
-
-      - name: Build and push Docker image to ECR (optimized)
+      - name: Build and push Docker image to ECR
         uses: docker/build-push-action@v3
         with:
           context: ./bot
           push: true
-          tags: ${{ steps.vars.outputs.IMAGE }}
-          cache-from: type=registry,ref=${{ steps.vars.outputs.IMAGE }}
+          tags: ${{ secrets.ECR_REGISTRY }}/${{ secrets.EC2_REPOSITORY }}:latest
+          cache-from: type=registry,ref=${{ secrets.ECR_REGISTRY }}/${{ secrets.EC2_REPOSITORY }}:latest
           cache-to: type=inline
 
-      - name: Decode EC2 SSH Key
+      - name: Decode EC2 SSH key
         run: |
           echo "${{ secrets.EC2_SSH_KEY_B64 }}" | base64 -d > /tmp/chatbot_sa_key.pem
           chmod 600 /tmp/chatbot_sa_key.pem
 
-      - name: Upload docker-compose.yml to EC2
+      - name: Prepare EC2 folder
         run: |
-          scp -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no docker-compose.yml ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/chatbot_sa/docker-compose.yml
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "sudo mkdir -p /home/${{ secrets.EC2_USER }}/chatbot_sa && sudo chown ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /home/${{ secrets.EC2_USER }}/chatbot_sa"
 
-      - name: Deploy to EC2
+      - name: Upload docker-compose.yml
         run: |
-          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} <<EOF
-            cd /home/${{ secrets.EC2_USER }}/chatbot_sa
-            docker-compose pull
-            docker-compose up -d
-          EOF
+          scp -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            docker-compose.yml \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/chatbot_sa/docker-compose.yml
+
+      - name: Deploy on EC2
+        run: |
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "cd /home/${{ secrets.EC2_USER }}/chatbot_sa && docker-compose pull && docker-compose up -d"
