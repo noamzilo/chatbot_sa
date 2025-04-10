@@ -2,9 +2,7 @@ version: "3.8"
 
 services:
   bot:
-    build:
-      context: ./bot
-      dockerfile: Dockerfile
+    image: ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
     container_name: chatbot_sa_bot
     volumes:
       - /home/ubuntu/.ssh/github_deploy:/root/.ssh/id_ed25519:ro
