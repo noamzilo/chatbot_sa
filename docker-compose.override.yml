@@ -2,5 +2,8 @@ version: "3.8"
 
 services:
   bot:
+    image: chatbot_sa_bot:latest
     volumes:
       - ${SSH_KEY_PATH:-/home/noams/.ssh/github_deploy}:/root/.ssh/id_ed25519:ro
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-dummy_token}

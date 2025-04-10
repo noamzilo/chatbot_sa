@@ -8,13 +8,11 @@ services:
     image: ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
     container_name: chatbot_sa_bot
     volumes:
-      - type: bind
-        source: /home/ubuntu/.ssh/github_deploy
-        target: /root/.ssh/id_ed25519
-        read_only: true
+      - /home/ubuntu/.ssh/github_deploy:/root/.ssh/id_ed25519:ro
     environment:
       - GIT_SSH_COMMAND=ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - WEBHOOK_MODE=true
     ports:
       - "8000:8000"
     restart: unless-stopped
