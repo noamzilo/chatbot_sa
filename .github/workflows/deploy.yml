@@ -122,17 +122,34 @@ jobs:
           echo "Checking container status..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "docker ps && \
-             echo 'Waiting 5 seconds for container to start...' && \
-             sleep 5 && \
-             echo 'Container logs:' && \
-             docker logs chatbot_sa_bot && \
-             echo 'Checking network configuration...' && \
-             echo 'Listening ports:' && \
-             sudo netstat -tulpn | grep 8000 && \
-             echo 'UFW status:' && \
-             sudo ufw status && \
-             echo 'Testing health endpoint locally...' && \
-             curl -v http://localhost:8000/health && \
-             echo 'Testing health endpoint from public IP...' && \
-             curl -v http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):8000/health"
+            "docker ps"
+          
+          echo "Waiting for container to start..."
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "sleep 5"
+          
+          echo "Checking container logs..."
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "docker logs chatbot_sa_bot"
+          
+          echo "Checking network configuration..."
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "echo 'Listening ports:' && sudo netstat -tulpn | grep 8000"
+          
+          echo "Checking firewall status..."
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "echo 'UFW status:' && sudo ufw status"
+          
+          echo "Testing health endpoint locally..."
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "curl -v http://localhost:8000/health"
+          
+          echo "Testing health endpoint from public IP..."
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "PUBLIC_IP=\$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4) && curl -v http://\$PUBLIC_IP:8000/health"
