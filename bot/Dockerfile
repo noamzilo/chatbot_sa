@@ -1,8 +1,10 @@
 FROM python:3.12-slim
 
-# Install dependencies including SSH server
+# Install dependencies including SSH server, git, and openssh-client
 RUN apt-get update && apt-get install -y \
 	openssh-server \
+	openssh-client \
+	git \
 	build-essential \
 	curl \
 	&& rm -rf /var/lib/apt/lists/*
@@ -13,6 +15,12 @@ RUN mkdir /var/run/sshd && \
 
 # Allow root login over SSH (optional and insecure for production, use with caution)
 RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+
+# Configure SSH client for GitHub
+RUN mkdir -p /root/.ssh && \
+	chmod 700 /root/.ssh && \
+	touch /root/.ssh/config && \
+	echo "Host github.com\n\tStrictHostKeyChecking no\n" >> /root/.ssh/config
 
 # Install latest Poetry (2.1.x) using the official recommended installer
 RUN curl -sSL https://install.python-poetry.org | python3 -

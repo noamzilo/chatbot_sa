@@ -1,8 +1,13 @@
-version: "3.9"
+version: "3.8"
 
 services:
-  telegram_bot:
-    image: 354918365739.dkr.ecr.us-east-1.amazonaws.com/chatbot_sa:latest
-    ports:
-      - "5000:5000"
+  bot:
+    build:
+      context: ./bot
+      dockerfile: Dockerfile
+    container_name: chatbot_sa_bot
+    volumes:
+      - /home/ubuntu/.ssh/github_deploy:/root/.ssh/id_ed25519:ro
+    environment:
+      - GIT_SSH_COMMAND=ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no
     restart: unless-stopped
