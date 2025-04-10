@@ -3,5 +3,5 @@
 # Start the SSH service
 service ssh start
 
-# Start the bot directly
-exec poetry run python telegram_bot/bot.py
+# Start the FastAPI server
+exec poetry run uvicorn main:app --host 0.0.0.0 --port 8000
