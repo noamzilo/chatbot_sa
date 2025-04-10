@@ -13,9 +13,18 @@ aws ec2 describe-instances --query "Reservations[*].Instances[*].{ID:InstanceId,
 Start EC2 instance
 aws ec2 start-instances --instance-ids i-0adeaebf9f64d7233  
 
+docker build
+cd bot
+docker build -t chatbot_sa_bot .
+
+docker run
+docker run --rm -it \
+	--env-file /home/noams/src/chatbot_sa/.secrets/.env \
+	--name chatbot_sa_bot \
+	chatbot_sa_bot
 
 run act
-act -j deploy --secret-file ~/src/chatbot_sa/.secrets/.env
+act -j deploy --secret-file /home/noams/src/chatbot_sa/.secrets/.env
 
 Aws ECR details
 {

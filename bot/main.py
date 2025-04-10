@@ -31,3 +31,6 @@ async def telegram_webhook(req: Request):
 	update = Update.de_json(await req.json(), app_bot.bot)
 	await app_bot.process_update(update)
 	return {"ok": True}
+
+if __name__ == "__main__":
+	app_bot.run_polling()
