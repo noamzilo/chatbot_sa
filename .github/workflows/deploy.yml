@@ -67,8 +67,31 @@ jobs:
             docker-compose.yml \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/chatbot_sa/docker-compose.yml
 
+      - name: Ensure Docker Compose >= v2.20.2 on EC2
+        run: |
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            'if ! command -v docker-compose >/dev/null; then
+               echo "Docker Compose not found, installing...";
+               INSTALL=1;
+             elif [ "$(docker-compose version --short)" != "2.20.2" ]; then
+               echo "Docker Compose version is outdated, updating...";
+               INSTALL=1;
+             else
+               echo "Docker Compose is up to date.";
+               INSTALL=0;
+             fi;
+             if [ "$INSTALL" = "1" ]; then
+               sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64" -o /usr/local/bin/docker-compose && \
+               sudo chmod +x /usr/local/bin/docker-compose && \
+               docker-compose version;
+             fi'
+
       - name: Deploy on EC2
         run: |
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }} && cd /home/${{ secrets.EC2_USER }}/chatbot_sa && docker-compose pull && docker-compose up -d"
+            "aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }} && \
+             cd /home/${{ secrets.EC2_USER }}/chatbot_sa && \
+             docker-compose pull && \
+             docker-compose up -d"
