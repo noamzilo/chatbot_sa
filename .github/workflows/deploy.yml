@@ -137,7 +137,7 @@ jobs:
           echo "Checking network configuration..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "echo 'Listening ports:' && sudo netstat -tulpn | grep 8000"
+            "echo 'Listening ports:' && sudo ss -tulpn | grep 8000"
           
           echo "Checking firewall status..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
@@ -152,4 +152,30 @@ jobs:
           echo "Testing health endpoint from public IP..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "PUBLIC_IP=\$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4) && curl -v http://\$PUBLIC_IP:8000/health"
+            "echo \"Testing http://${{ secrets.EC2_HOST }}:8000/health\"; curl -v \"http://${{ secrets.EC2_HOST }}:8000/health\""
+
+      - name: Configure EC2 Security Group
+        run: |
+          echo "Getting instance security group..."
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=private-ip-address,Values=${{ secrets.EC2_HOST }}" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text)
+          
+          SECURITY_GROUP_ID=$(aws ec2 describe-instances \
+            --instance-ids $INSTANCE_ID \
+            --query 'Reservations[0].Instances[0].SecurityGroups[0].GroupId' \
+            --output text)
+          
+          echo "Current security group rules:"
+          aws ec2 describe-security-groups \
+            --group-ids $SECURITY_GROUP_ID \
+            --query 'SecurityGroups[0].IpPermissions' \
+            --output json
+          
+          echo "Adding inbound rule for port 8000..."
+          aws ec2 authorize-security-group-ingress \
+            --group-id $SECURITY_GROUP_ID \
+            --protocol tcp \
+            --port 8000 \
+            --cidr 0.0.0.0/0
