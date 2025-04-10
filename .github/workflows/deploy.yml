@@ -21,17 +21,33 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      - name: Set image tag
+        id: vars
+        run: echo "IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest" >> "$GITHUB_OUTPUT"
+
+      - name: Install AWS CLI (for act compatibility)
+        run: |
+          curl -sSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
+          unzip -q awscliv2.zip
+          sudo ./aws/install
+          aws --version
+
       - name: Log in to Amazon ECR
         run: |
           aws ecr get-login-password | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
+
+      - name: Pull existing image (if any) for cache
+        continue-on-error: true
+        run: |
+          docker pull ${{ steps.vars.outputs.IMAGE }}
 
       - name: Build and push Docker image to ECR
         uses: docker/build-push-action@v3
         with:
           context: ./bot
           push: true
-          tags: ${{ secrets.ECR_REGISTRY }}/${{ secrets.EC2_REPOSITORY }}:latest
-          cache-from: type=registry,ref=${{ secrets.ECR_REGISTRY }}/${{ secrets.EC2_REPOSITORY }}:latest
+          tags: ${{ steps.vars.outputs.IMAGE }}
+          cache-from: type=registry,ref=${{ steps.vars.outputs.IMAGE }}
           cache-to: type=inline
 
       - name: Decode EC2 SSH key
