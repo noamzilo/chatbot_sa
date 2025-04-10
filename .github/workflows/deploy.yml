@@ -24,8 +24,8 @@ jobs:
 
       - name: Log in to Amazon ECR
         run: |
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip awscliv2.zip > /dev/null
+          curl -sSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
+          unzip awscliv2.zip >/dev/null
           sudo ./aws/install
           aws --version
           aws ecr get-login-password | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
@@ -49,10 +49,14 @@ jobs:
           echo "${{ secrets.EC2_SSH_KEY_B64 }}" | base64 -d > /tmp/chatbot_sa_key.pem
           chmod 600 /tmp/chatbot_sa_key.pem
 
+      - name: Upload docker-compose.yml to EC2
+        run: |
+          scp -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no docker-compose.yml ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/chatbot_sa/docker-compose.yml
+
       - name: Deploy to EC2
         run: |
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} <<EOF
-            cd /home/ubuntu/src/chatbot_sa
-            docker-compose pull telegram_bot
-            docker-compose up -d telegram_bot
+            cd /home/${{ secrets.EC2_USER }}/chatbot_sa
+            docker-compose pull
+            docker-compose up -d
           EOF

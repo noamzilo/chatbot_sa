@@ -2,10 +2,7 @@ version: "3.9"
 
 services:
   telegram_bot:
-    build:
-      context: ./bot
-    env_file:
-      - .secrets/.env
+    image: 354918365739.dkr.ecr.us-east-1.amazonaws.com/chatbot_sa:latest
     ports:
       - "5000:5000"
     restart: unless-stopped
