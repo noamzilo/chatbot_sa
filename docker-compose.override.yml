@@ -1,0 +1,6 @@
+version: "3.8"
+
+services:
+  bot:
+    volumes:
+      - ${SSH_KEY_PATH:-/home/noams/.ssh/github_deploy}:/root/.ssh/id_ed25519:ro
