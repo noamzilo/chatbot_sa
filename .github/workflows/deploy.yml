@@ -21,7 +21,7 @@ jobs:
 
       - name: ssh to ec2
         run: |
-          ssh -v -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
             "echo aaaaaaa"
             exit 0
