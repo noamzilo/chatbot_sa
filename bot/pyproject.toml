@@ -1,14 +1,15 @@
 [tool.poetry]
-name = "chatbot_sa"
+name = "chatbot-sa"
 version = "0.1.0"
-description = "Telegram bot with FastAPI"
+description = ""
 authors = ["Noam Salomonski"]
+readme = "README.md"
+packages = [{include = "chatbot_sa"}]
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "^3.12"
 fastapi = "^0.110.0"
-uvicorn = "^0.29.0"
-python-telegram-bot = {extras = ["webhooks"], version = "^20.7"}
+six = "^1.17.0"
 
 [build-system]
 requires = ["poetry-core"]
