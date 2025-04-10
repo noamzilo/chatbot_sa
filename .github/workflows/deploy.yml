@@ -73,6 +73,21 @@ jobs:
             docker-compose.yml \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/chatbot_sa/docker-compose.yml
 
+      - name: Create and upload .env file
+        run: |
+          echo "EC2_HOST=${{ secrets.EC2_HOST }}" > /tmp/.env
+          echo "EC2_USER=${{ secrets.EC2_USER }}" >> /tmp/.env
+          echo "EC2_SSH_KEY_B64=${{ secrets.EC2_SSH_KEY_B64 }}" >> /tmp/.env
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> /tmp/.env
+          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> /tmp/.env
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> /tmp/.env
+          echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> /tmp/.env
+          echo "ECR_REGISTRY=${{ secrets.ECR_REGISTRY }}" >> /tmp/.env
+          echo "ECR_REPOSITORY=${{ secrets.ECR_REPOSITORY }}" >> /tmp/.env
+          scp -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            /tmp/.env \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/chatbot_sa/.env
+
       - name: Ensure Docker Compose >= v2.20.2 on EC2
         run: |
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
@@ -97,9 +112,7 @@ jobs:
         run: |
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "export ECR_REGISTRY='${{ secrets.ECR_REGISTRY }}'; \
-             export ECR_REPOSITORY='${{ secrets.ECR_REPOSITORY }}'; \
+            "cd /home/${{ secrets.EC2_USER }}/chatbot_sa && \
              aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }} && \
-             cd /home/${{ secrets.EC2_USER }}/chatbot_sa && \
-             docker-compose pull && \
-             docker-compose up -d"
+             docker-compose --env-file .env pull && \
+             docker-compose --env-file .env up -d"
