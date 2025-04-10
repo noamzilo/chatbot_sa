@@ -14,86 +14,94 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Set image tag
-        id: vars
-        run: echo "IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest" >> "$GITHUB_OUTPUT"
-
-      - name: Install or Update AWS CLI (for act compatibility)
-        run: |
-          curl -sSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
-          unzip -q awscliv2.zip
-          sudo ./aws/install --update
-          aws --version
-
-      - name: Log in to Amazon ECR
-        run: |
-          aws ecr get-login-password | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
-
-      - name: Pull existing image (if any) for cache
-        continue-on-error: true
-        run: |
-          docker pull ${{ steps.vars.outputs.IMAGE }}
-
-      - name: Build and push Docker image to ECR
-        uses: docker/build-push-action@v3
-        with:
-          context: ./bot
-          push: true
-          tags: ${{ steps.vars.outputs.IMAGE }}
-          cache-from: type=registry,ref=${{ steps.vars.outputs.IMAGE }}
-          cache-to: type=inline
-
       - name: Decode EC2 SSH key
         run: |
           echo "${{ secrets.EC2_SSH_KEY_B64 }}" | base64 -d > /tmp/chatbot_sa_key.pem
           chmod 600 /tmp/chatbot_sa_key.pem
 
-      - name: Prepare EC2 folder
+      - name: ssh to ec2
         run: |
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "sudo mkdir -p /home/${{ secrets.EC2_USER }}/chatbot_sa && sudo chown ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /home/${{ secrets.EC2_USER }}/chatbot_sa"
+            "echo aaaaaaa"
+            exit 0
 
-      - name: Upload docker-compose.yml
-        run: |
-          scp -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
-            docker-compose.yml \
-            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/chatbot_sa/docker-compose.yml
 
-      - name: Ensure Docker Compose >= v2.20.2 on EC2
-        run: |
-          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            'if ! command -v docker-compose >/dev/null; then
-               echo "Docker Compose not found, installing...";
-               INSTALL=1;
-             elif [ "$(docker-compose version --short)" != "2.20.2" ]; then
-               echo "Docker Compose version is outdated, updating...";
-               INSTALL=1;
-             else
-               echo "Docker Compose is up to date.";
-               INSTALL=0;
-             fi;
-             if [ "$INSTALL" = "1" ]; then
-               sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64" -o /usr/local/bin/docker-compose && \
-               sudo chmod +x /usr/local/bin/docker-compose && \
-               docker-compose version;
-             fi'
+    #   - name: Configure AWS credentials
+    #     uses: aws-actions/configure-aws-credentials@v2
+    #     with:
+    #       aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+    #       aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    #       aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Deploy on EC2
-        run: |
-          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "export ECR_REGISTRY='${{ secrets.ECR_REGISTRY }}'; \
-             export ECR_REPOSITORY='${{ secrets.ECR_REPOSITORY }}'; \
-             aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }} && \
-             cd /home/${{ secrets.EC2_USER }}/chatbot_sa && \
-             docker-compose pull && \
-             docker-compose up -d"
+    #   - name: Set image tag
+    #     id: vars
+    #     run: echo "IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest" >> "$GITHUB_OUTPUT"
+
+    #   - name: Install or Update AWS CLI (for act compatibility)
+    #     run: |
+    #       curl -sSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
+    #       unzip -q awscliv2.zip
+    #       sudo ./aws/install --update
+    #       aws --version
+
+    #   - name: Log in to Amazon ECR
+    #     run: |
+    #       aws ecr get-login-password | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
+
+    #   - name: Pull existing image (if any) for cache
+    #     continue-on-error: true
+    #     run: |
+    #       docker pull ${{ steps.vars.outputs.IMAGE }}
+
+    #   - name: Build and push Docker image to ECR
+    #     uses: docker/build-push-action@v3
+    #     with:
+    #       context: ./bot
+    #       push: true
+    #       tags: ${{ steps.vars.outputs.IMAGE }}
+    #       cache-from: type=registry,ref=${{ steps.vars.outputs.IMAGE }}
+    #       cache-to: type=inline
+
+    #   - name: Prepare EC2 folder
+    #     run: |
+    #       ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+    #         ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+    #         "sudo mkdir -p /home/${{ secrets.EC2_USER }}/chatbot_sa && sudo chown ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /home/${{ secrets.EC2_USER }}/chatbot_sa"
+
+    #   - name: Upload docker-compose.yml
+    #     run: |
+    #       scp -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+    #         docker-compose.yml \
+    #         ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/chatbot_sa/docker-compose.yml
+
+    #   - name: Ensure Docker Compose >= v2.20.2 on EC2
+    #     run: |
+    #       ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+    #         ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+    #         'if ! command -v docker-compose >/dev/null; then
+    #            echo "Docker Compose not found, installing...";
+    #            INSTALL=1;
+    #          elif [ "$(docker-compose version --short)" != "2.20.2" ]; then
+    #            echo "Docker Compose version is outdated, updating...";
+    #            INSTALL=1;
+    #          else
+    #            echo "Docker Compose is up to date.";
+    #            INSTALL=0;
+    #          fi;
+    #          if [ "$INSTALL" = "1" ]; then
+    #            sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64" -o /usr/local/bin/docker-compose && \
+    #            sudo chmod +x /usr/local/bin/docker-compose && \
+    #            docker-compose version;
+    #          fi'
+
+    #   - name: Deploy on EC2
+    #     run: |
+    #       ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+    #         ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+    #         "export ECR_REGISTRY='${{ secrets.ECR_REGISTRY }}'; \
+    #          export ECR_REPOSITORY='${{ secrets.ECR_REPOSITORY }}'; \
+    #          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }} && \
+    #          cd /home/${{ secrets.EC2_USER }}/chatbot_sa && \
+    #          docker-compose pull && \
+    #          docker-compose up -d"
