@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from telegram.ext import CallbackContext
+from telegram.ext import MessageHandler, filters
 
 # Configure logging
 logging.basicConfig(
@@ -28,8 +29,16 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 	logging.info(f"Echo command received from user {update.effective_user.id}: {update.message.text}")
 	await context.bot.send_message(chat_id=update.effective_chat.id, text=update.message.text)
 
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+	text = update.message.text
+	await update.message.reply_text(f"You said: {text}")
+
+
+# This catches any text that is NOT a /command
 app_bot.add_handler(CommandHandler("start", start))
 app_bot.add_handler(CommandHandler("echo", echo))
+app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
 # FastAPI app
 app = FastAPI()
@@ -52,6 +61,7 @@ async def telegram_webhook(req: Request):
 	except Exception as e:
 		logging.error(f"Error processing webhook update: {e}")
 		raise
+
 
 if __name__ == "__main__":
 	print(f"WEBHOOK_MODE: {WEBHOOK_MODE}")
