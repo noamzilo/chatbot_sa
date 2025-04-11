@@ -54,6 +54,7 @@ async def telegram_webhook(req: Request):
 		raise
 
 if __name__ == "__main__":
+	print(f"WEBHOOK_MODE: {WEBHOOK_MODE}")
 	if WEBHOOK_MODE:
 		# In webhook mode, FastAPI will handle the updates
 		import uvicorn
