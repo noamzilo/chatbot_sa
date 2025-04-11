@@ -47,7 +47,7 @@ jobs:
         run: |
           aws ecr get-login-password | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
 
-      - name: Pull existing image (if any) for cache
+      - name: Pull existing image (if any) for build cache
         continue-on-error: true
         run: |
           docker pull ${{ steps.vars.outputs.IMAGE }}
@@ -65,7 +65,8 @@ jobs:
         run: |
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "sudo mkdir -p /home/${{ secrets.EC2_USER }}/chatbot_sa && sudo chown ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /home/${{ secrets.EC2_USER }}/chatbot_sa"
+            "sudo mkdir -p /home/${{ secrets.EC2_USER }}/chatbot_sa && \
+             sudo chown ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /home/${{ secrets.EC2_USER }}/chatbot_sa"
 
       - name: Upload docker-compose.yml
         run: |
@@ -103,7 +104,8 @@ jobs:
                INSTALL=0;
              fi;
              if [ "$INSTALL" = "1" ]; then
-               sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64" -o /usr/local/bin/docker-compose && \
+               sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64" \
+                 -o /usr/local/bin/docker-compose && \
                sudo chmod +x /usr/local/bin/docker-compose && \
                docker-compose version;
              fi'
@@ -113,69 +115,58 @@ jobs:
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
             "cd /home/${{ secrets.EC2_USER }}/chatbot_sa && \
-             aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }} && \
+             aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
+               | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }} && \
              docker-compose --env-file .env pull && \
              docker-compose --env-file .env up -d"
 
-      - name: Verify deployment
+      - name: Configure EC2 Security Group
+        run: |
+          echo "Verifying EC2_HOST is set..."
+          if [ -z "${{ secrets.EC2_HOST }}" ]; then
+            echo "Error: EC2_HOST is not set"
+            exit 1
+          fi
+          echo "Adding inbound rule for port 8000 to default security group..."
+          AWS_PAGER="" aws ec2 authorize-security-group-ingress \
+            --group-name default \
+            --protocol tcp \
+            --port 8000 \
+            --cidr 0.0.0.0/0 || true
+
+      - name: Verify deployment (local + public IP)
         run: |
           echo "Checking container status..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
             "docker ps"
-          
+
           echo "Waiting for container to start..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
             "sleep 5"
-          
+
           echo "Checking container logs..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
             "docker logs chatbot_sa_bot"
-          
+
           echo "Checking network configuration..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
             "echo 'Listening ports:' && sudo ss -tulpn | grep 8000"
-          
+
           echo "Checking firewall status..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
             "echo 'UFW status:' && sudo ufw status"
-          
+
           echo "Testing health endpoint locally..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
             "curl -v http://localhost:8000/health"
-          
-          echo "Testing health endpoint from public IP..."
-          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "echo \"Testing http://${{ secrets.EC2_HOST }}:8000/health\"; curl -v \"http://${{ secrets.EC2_HOST }}:8000/health\""
 
-      - name: Configure EC2 Security Group
-        run: |
-          echo "Getting instance security group..."
-          INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=private-ip-address,Values=${{ secrets.EC2_HOST }}" \
-            --query 'Reservations[0].Instances[0].InstanceId' \
-            --output text)
-          
-          SECURITY_GROUP_ID=$(aws ec2 describe-instances \
-            --instance-ids $INSTANCE_ID \
-            --query 'Reservations[0].Instances[0].SecurityGroups[0].GroupId' \
-            --output text)
-          
-          echo "Current security group rules:"
-          aws ec2 describe-security-groups \
-            --group-ids $SECURITY_GROUP_ID \
-            --query 'SecurityGroups[0].IpPermissions' \
-            --output json
-          
-          echo "Adding inbound rule for port 8000..."
-          aws ec2 authorize-security-group-ingress \
-            --group-id $SECURITY_GROUP_ID \
-            --protocol tcp \
-            --port 8000 \
-            --cidr 0.0.0.0/0
+          echo "Testing health endpoint from public IP..."
+          # This may time out when running under 'act' locally
+          curl -v "http://${{ secrets.EC2_HOST }}:8000/health"
+        continue-on-error: false
