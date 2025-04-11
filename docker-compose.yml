@@ -12,7 +12,7 @@ services:
     environment:
       - GIT_SSH_COMMAND=ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - WEBHOOK_MODE=true
+      - WEBHOOK_MODE=${TELEGRAM_WEBHOOK_MODE}
     ports:
       - "8000:8000"
     restart: unless-stopped
