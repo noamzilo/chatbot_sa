@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   bot:
     image: chatbot_sa_bot:latest
