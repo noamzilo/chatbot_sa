@@ -1,8 +1,8 @@
 version: "3.8"
-env_file:
-  - .secrets/.env
 services:
   db:
+    env_file:
+      - .secrets/.env
     image: ankane/pgvector:latest
     container_name: vector_db
     environment:
@@ -17,6 +17,8 @@ services:
     restart: unless-stopped
 
   bot:
+    env_file:
+      - .secrets/.env
     build:
       context: ./bot
       dockerfile: Dockerfile
@@ -40,6 +42,8 @@ services:
     restart: unless-stopped
 
   crawler:
+    env_file:
+      - .secrets/.env
     build:
       context: ./crawlers/gringo
       dockerfile: Dockerfile
