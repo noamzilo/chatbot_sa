@@ -1,6 +1,21 @@
 version: "3.8"
-
+env_file:
+  - .secrets/.env
 services:
+  db:
+    image: ankane/pgvector:latest
+    container_name: vector_db
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    restart: unless-stopped
+
   bot:
     build:
       context: ./bot
@@ -13,6 +28,33 @@ services:
       - GIT_SSH_COMMAND=ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - WEBHOOK_MODE=${TELEGRAM_WEBHOOK_MODE}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+    depends_on:
+      - db
     ports:
       - "8000:8000"
     restart: unless-stopped
+
+  crawler:
+    build:
+      context: ./crawlers/gringo
+      dockerfile: Dockerfile
+    image: ${ECR_REGISTRY}/${ECR_REPOSITORY}_crawler:latest
+    container_name: crawler_gringo
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    depends_on:
+      - db
+    restart: on-failure
+
+volumes:
+  pgdata:
