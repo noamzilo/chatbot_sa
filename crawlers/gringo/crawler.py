@@ -1,4 +1,5 @@
 import os
+import time
 from typing import List, Dict, Any
 import requests
 from bs4 import BeautifulSoup
@@ -7,7 +8,7 @@ from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 from langchain_community.document_loaders import SitemapLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 
 # Load environment variables from .env file in the project root
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env'))
@@ -78,6 +79,7 @@ class GringoCrawler:
 
     def crawl(self):
         """Main crawling function that processes the sitemap and stores content."""
+        print("Starting crawler...")
         sitemap_url = "https://gringo.co.il/sitemap.xml"
         
         # Use LangChain's SitemapLoader
@@ -115,11 +117,23 @@ class GringoCrawler:
             self._link_page_to_affiliates(page_id, affiliate_ids)
             
             self.db_connection.commit()
+        print("Crawler finished.")
 
     def __del__(self):
         if hasattr(self, 'db_connection'):
             self.db_connection.close()
 
+def main():
+    while True:
+        try:
+            crawler = GringoCrawler()
+            crawler.crawl()
+            print("Waiting 1 hour before next run...")
+            time.sleep(3600)
+        except Exception as e:
+            print(f"Error occurred: {e}")
+            print("Retrying in 5 minutes...")
+            time.sleep(300)
+
 if __name__ == "__main__":
-    crawler = GringoCrawler()
-    crawler.crawl() 
+    main() 
