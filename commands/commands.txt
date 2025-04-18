@@ -26,8 +26,14 @@ docker run --rm -it \
 docker compose
 docker-compose --env-file .secrets/.env up --build
 
+docker compose run crawler
+docker-compose --env-file .secrets/.env up -d db crawler
+
 docker poll env variable
 ubuntu@ip-172-31-31-222:~$ docker exec -it chatbot_sa_bot printenv | grep WEBHOOK_MODE
+
+docker logs
+docker-compose logs -f db crawler
 
 run act
 act -j deploy --secret-file /home/noams/src/chatbot_sa/.secrets/.env

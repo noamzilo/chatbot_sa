@@ -18,8 +18,12 @@ COPY pyproject.toml ./
 RUN poetry config virtualenvs.create false \
 	&& poetry install --no-interaction --no-ansi
 
-# Copy the crawler code
+# Copy the crawler code and entrypoint
 COPY crawler.py ./
+COPY entrypoint.sh ./
 
-# Run the crawler
-CMD ["python", "crawler.py"]
+# Make entrypoint executable
+RUN chmod +x entrypoint.sh
+
+# Use the entrypoint script
+ENTRYPOINT ["./entrypoint.sh"]

@@ -7,8 +7,10 @@ from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 from langchain_community.document_loaders import SitemapLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.embeddings import OpenAIEmbeddings
 
-load_dotenv()
+# Load environment variables from .env file in the project root
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env'))
 
 class GringoCrawler:
     def __init__(self):
@@ -19,20 +21,48 @@ class GringoCrawler:
             host=os.getenv('POSTGRES_HOST'),
             port=os.getenv('POSTGRES_PORT')
         )
-        self._init_db()
+        self.embeddings = OpenAIEmbeddings(openai_api_key=os.getenv('OPENAI_API_KEY'))
 
-    def _init_db(self):
+    def _get_or_create_affiliate_link(self, url: str, link_text: str) -> int:
+        """Get existing affiliate link ID or create new one."""
         with self.db_connection.cursor() as cursor:
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS gringo_pages (
-                    id SERIAL PRIMARY KEY,
-                    url TEXT UNIQUE,
-                    content TEXT,
-                    affiliate_links JSONB,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            self.db_connection.commit()
+                INSERT INTO gringo.affiliate_links (url, link_text)
+                VALUES (%s, %s)
+                ON CONFLICT (url, link_text) DO UPDATE
+                SET updated_at = CURRENT_TIMESTAMP
+                RETURNING id
+            """, (url, link_text))
+            return cursor.fetchone()[0]
+
+    def _store_page_with_embedding(self, url: str, title: str, content: str) -> int:
+        """Store page content and generate embedding."""
+        embedding = self.embeddings.embed_query(content)
+        
+        with self.db_connection.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO gringo.pages (url, title, content, embedding)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (url) DO UPDATE
+                SET title = EXCLUDED.title,
+                    content = EXCLUDED.content,
+                    embedding = EXCLUDED.embedding,
+                    updated_at = CURRENT_TIMESTAMP
+                RETURNING id
+            """, (url, title, content, embedding))
+            return cursor.fetchone()[0]
+
+    def _link_page_to_affiliates(self, page_id: int, affiliate_ids: List[int]):
+        """Create links between page and its affiliate links."""
+        if not affiliate_ids:
+            return
+            
+        with self.db_connection.cursor() as cursor:
+            execute_values(cursor, """
+                INSERT INTO gringo.page_affiliate_links (page_id, affiliate_id)
+                VALUES %s
+                ON CONFLICT DO NOTHING
+            """, [(page_id, aid) for aid in affiliate_ids])
 
     def _extract_affiliate_links(self, soup: BeautifulSoup) -> List[Dict[str, str]]:
         """Extract affiliate links from the page content."""
@@ -64,6 +94,7 @@ class GringoCrawler:
         # Process each chunk
         for chunk in chunks:
             url = chunk.metadata.get('source', '')
+            title = chunk.metadata.get('title', '')
             content = chunk.page_content
             
             # Get the full page to extract affiliate links
@@ -71,15 +102,17 @@ class GringoCrawler:
             soup = BeautifulSoup(response.text, 'lxml')
             affiliate_links = self._extract_affiliate_links(soup)
             
-            # Store in database
-            with self.db_connection.cursor() as cursor:
-                cursor.execute("""
-                    INSERT INTO gringo_pages (url, content, affiliate_links)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (url) DO UPDATE
-                    SET content = EXCLUDED.content,
-                        affiliate_links = EXCLUDED.affiliate_links
-                """, (url, content, affiliate_links))
+            # Store page and get its ID
+            page_id = self._store_page_with_embedding(url, title, content)
+            
+            # Process affiliate links
+            affiliate_ids = []
+            for link in affiliate_links:
+                affiliate_id = self._get_or_create_affiliate_link(link['url'], link['text'])
+                affiliate_ids.append(affiliate_id)
+            
+            # Link page to its affiliate links
+            self._link_page_to_affiliates(page_id, affiliate_ids)
             
             self.db_connection.commit()
 
