@@ -31,8 +31,9 @@ class GringoCrawler:
 			host	=os.getenv("POSTGRES_HOST"),
 			port	=os.getenv("POSTGRES_PORT")
 		)
+		self.db.set_session(autocommit=True)
 		register_vector(self.db)
-		self.db.autocommit = False		# manual commits
+		self.db.set_session(autocommit=False)		# manual commits
 
 		print("[INIT] Loading OpenAI embeddings…")
 		self.embedder = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
