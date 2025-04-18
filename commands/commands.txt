@@ -38,6 +38,9 @@ docker-compose logs -f db crawler
 run act
 act -j deploy --secret-file /home/noams/src/chatbot_sa/.env
 
+Connect to db
+docker exec -it vector_db psql -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-chatbot_sa}
+
 Aws ECR details
 {
     "repository": {
