@@ -8,6 +8,7 @@ authors = ["Noam"]
 python = "^3.12"
 langchain = "^0.1.0"
 langchain-community = "^0.0.10"
+langchain-openai = "^0.0.5"
 beautifulsoup4 = "^4.12.2"
 psycopg2-binary = "^2.9.9"
 python-dotenv = "^1.0.0"
