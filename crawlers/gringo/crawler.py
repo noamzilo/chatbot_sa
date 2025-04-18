@@ -15,6 +15,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file_
 
 class GringoCrawler:
 	def __init__(self):
+		print("[INIT] Connecting to DB...")
 		self.db_connection = psycopg2.connect(
 			dbname=os.getenv('POSTGRES_DB'),
 			user=os.getenv('POSTGRES_USER'),
@@ -22,7 +23,11 @@ class GringoCrawler:
 			host=os.getenv('POSTGRES_HOST'),
 			port=os.getenv('POSTGRES_PORT')
 		)
+		print("[INIT] DB connection OK.")
+
+		print("[INIT] Initializing OpenAI embeddings...")
 		self.embeddings = OpenAIEmbeddings(openai_api_key=os.getenv('OPENAI_API_KEY'))
+		print("[INIT] Embeddings initialized.")
 
 	def _get_or_create_affiliate_link(self, url: str, link_text: str) -> int:
 		"""Get existing affiliate link ID or create new one."""
@@ -86,48 +91,68 @@ class GringoCrawler:
 		return affiliate_links
 
 	def crawl(self):
-		"""Main crawling function that processes the sitemap and stores content."""
 		print("Starting crawler...")
+
 		sitemap_url = "https://gringo.co.il/sitemap.xml"
-		
-		# Use LangChain's SitemapLoader
-		loader = SitemapLoader(sitemap_url)
-		documents = loader.load()
-		
+		print(f"[CRAWLER] Loading sitemap: {sitemap_url}")
+		try:
+			loader = SitemapLoader(sitemap_url)
+			print("[CRAWLER] SitemapLoader initialized.")
+			documents = loader.load()
+			print(f"[CRAWLER] Loaded {len(documents)} documents.")
+		except Exception as e:
+			print(f"[ERROR] Failed to load sitemap or documents: {e}")
+			return
+
 		# Split documents into chunks
+		print("[CRAWLER] Splitting documents into chunks...")
 		text_splitter = RecursiveCharacterTextSplitter(
 			chunk_size=1000,
 			chunk_overlap=200
 		)
-		chunks = text_splitter.split_documents(documents)
-		
+		try:
+			chunks = text_splitter.split_documents(documents)
+			print(f"[CRAWLER] Split into {len(chunks)} chunks.")
+		except Exception as e:
+			print(f"[ERROR] Text splitting failed: {e}")
+			return
+
 		# Process each chunk
-		for chunk in chunks:
-			url = chunk.metadata.get('source', '')
-			title = chunk.metadata.get('title', '')
-			content = chunk.page_content
-			
-			# Get the full page to extract affiliate links
-			response = requests.get(url)
-			soup = BeautifulSoup(response.text, 'lxml')
-			affiliate_links = self._extract_affiliate_links(soup)
-			
-			# Store page and get its ID
-			page_id = self._store_page_with_embedding(url, title, content)
-			
-			# Process affiliate links
-			affiliate_ids = []
-			for link in affiliate_links:
-				affiliate_id = self._get_or_create_affiliate_link(link['url'], link['text'])
-				affiliate_ids.append(affiliate_id)
-			
-			# Link page to its affiliate links
-			self._link_page_to_affiliates(page_id, affiliate_ids)
-			
+		for i, chunk in enumerate(chunks):
 			try:
-				self.db_connection.commit()
+				url = chunk.metadata.get('source', '')
+				title = chunk.metadata.get('title', '')
+				content = chunk.page_content
+
+				print(f"[{i+1}/{len(chunks)}] Processing {url}")
+
+				# Get the full page to extract affiliate links
+				response = requests.get(url, timeout=10)
+				soup = BeautifulSoup(response.text, 'lxml')
+				affiliate_links = self._extract_affiliate_links(soup)
+
+				# Store page and get its ID
+				page_id = self._store_page_with_embedding(url, title, content)
+				if page_id == -1:
+					print(f"[WARN] Skipped {url} due to insert failure.")
+					continue
+
+				# Process affiliate links
+				affiliate_ids = []
+				for link in affiliate_links:
+					affiliate_id = self._get_or_create_affiliate_link(link['url'], link['text'])
+					affiliate_ids.append(affiliate_id)
+
+				# Link page to its affiliate links
+				self._link_page_to_affiliates(page_id, affiliate_ids)
+
+				try:
+					self.db_connection.commit()
+				except Exception as e:
+					print(f"[ERROR] Commit failed for {url}: {e}")
 			except Exception as e:
-				print(f"[ERROR] Commit failed: {e}")
+				print(f"[ERROR] Failed to process chunk {i+1}: {e}")
+
 		print("Crawler finished.")
 
 	def __del__(self):
