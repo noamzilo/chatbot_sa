@@ -16,7 +16,7 @@ from langchain_openai import OpenAIEmbeddings
 # ───────────────────────── CONFIG ─────────────────────────
 SITEMAP_URL	= "https://gringo.co.il/sitemap.xml"
 SITEMAP_TTL	= 7 * 24 * 3600	# 7 days
-MAX_PAGES	= 1				# set to float("inf") in prod
+MAX_PAGES	= 1				# `set to float("inf") in prod
 # ──────────────────────────────────────────────────────────
 PROJECT_ROOT	= os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
