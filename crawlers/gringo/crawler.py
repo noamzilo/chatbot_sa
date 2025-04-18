@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 from langchain_community.document_loaders import SitemapLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
+import xml.etree.ElementTree as ET
+from langchain.docstore.document import Document
 
 # Load environment variables from .env file in the project root
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env'))
@@ -90,6 +92,8 @@ class GringoCrawler:
 				})
 		return affiliate_links
 
+
+
 	def crawl(self):
 		print("Starting crawler...")
 
@@ -98,18 +102,31 @@ class GringoCrawler:
 		try:
 			loader = SitemapLoader(sitemap_url)
 			print("[CRAWLER] SitemapLoader initialized.")
+			print("[CRAWLER] Calling loader.load()...")
 			documents = loader.load()
-			print(f"[CRAWLER] Loaded {len(documents)} documents.")
+			print(f"[CRAWLER] Loaded {len(documents)} documents via LangChain.")
 		except Exception as e:
-			print(f"[ERROR] Failed to load sitemap or documents: {e}")
-			return
+			print(f"[WARN] SitemapLoader failed: {e}")
+			print("[CRAWLER] Falling back to raw XML fetch...")
+
+			try:
+				resp = requests.get(sitemap_url, timeout=10)
+				resp.raise_for_status()
+				print(f"[CRAWLER] Raw sitemap fetched, {len(resp.text)} bytes.")
+
+				root = ET.fromstring(resp.text)
+				urls = [elem.text for elem in root.findall(".//{*}loc") if elem.text]
+				print(f"[CRAWLER] Parsed {len(urls)} URLs from raw XML.")
+
+				# Wrap URLs in LangChain-compatible Document objects
+				documents = [Document(page_content="", metadata={"source": url}) for url in urls]
+			except Exception as e2:
+				print(f"[ERROR] Raw sitemap fallback also failed: {e2}")
+				return
 
 		# Split documents into chunks
 		print("[CRAWLER] Splitting documents into chunks...")
-		text_splitter = RecursiveCharacterTextSplitter(
-			chunk_size=1000,
-			chunk_overlap=200
-		)
+		text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
 		try:
 			chunks = text_splitter.split_documents(documents)
 			print(f"[CRAWLER] Split into {len(chunks)} chunks.")
@@ -122,28 +139,29 @@ class GringoCrawler:
 			try:
 				url = chunk.metadata.get('source', '')
 				title = chunk.metadata.get('title', '')
-				content = chunk.page_content
+				response = requests.get(url, timeout=10)
+				soup = BeautifulSoup(response.text, "lxml")
+				content = soup.get_text(separator="\n", strip=True)
+				if not content:
+					print(f"[SKIP] Empty content for URL: {url}")
+					continue
 
 				print(f"[{i+1}/{len(chunks)}] Processing {url}")
 
-				# Get the full page to extract affiliate links
 				response = requests.get(url, timeout=10)
 				soup = BeautifulSoup(response.text, 'lxml')
 				affiliate_links = self._extract_affiliate_links(soup)
 
-				# Store page and get its ID
 				page_id = self._store_page_with_embedding(url, title, content)
 				if page_id == -1:
 					print(f"[WARN] Skipped {url} due to insert failure.")
 					continue
 
-				# Process affiliate links
 				affiliate_ids = []
 				for link in affiliate_links:
 					affiliate_id = self._get_or_create_affiliate_link(link['url'], link['text'])
 					affiliate_ids.append(affiliate_id)
 
-				# Link page to its affiliate links
 				self._link_page_to_affiliates(page_id, affiliate_ids)
 
 				try:
@@ -154,6 +172,7 @@ class GringoCrawler:
 				print(f"[ERROR] Failed to process chunk {i+1}: {e}")
 
 		print("Crawler finished.")
+
 
 	def __del__(self):
 		if hasattr(self, 'db_connection'):
