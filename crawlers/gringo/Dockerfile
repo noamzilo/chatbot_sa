@@ -21,5 +21,7 @@ RUN poetry config virtualenvs.create false \
 # Copy the crawler code
 COPY crawler.py ./
 
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 # Run the crawler
-CMD ["python", "crawler.py"]
+ENTRYPOINT ["/entrypoint.sh"]
