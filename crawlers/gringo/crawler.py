@@ -15,6 +15,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from langchain.docstore.document import Document
 from tqdm import tqdm
+from datetime import datetime, timezone, timedelta
 
 # ───────────────────────── CONFIG ─────────────────────────
 SITEMAP_URL	= "https://gringo.co.il/sitemap.xml"
@@ -80,20 +81,23 @@ class GringoCrawler:
 				return [r[0] for r in rows]
 
 		print("[CACHE] Refreshing sitemap cache…")
-		resp = requests.get(SITEMAP_URL, timeout=10)
+		headers = {
+			"User-Agent": "Mozilla/5.0 (compatible; GringoCrawler/1.0; +https://gringo.co.il)"
+		}
+		resp = requests.get(SITEMAP_URL, timeout=10, headers=headers)
 		print(f"[DEBUG] GET {SITEMAP_URL} = {resp.status_code}, {len(resp.text)} bytes")
 		resp.raise_for_status()
 		root = ET.fromstring(resp.text)
 		urls = [loc.text for loc in root.findall(".//{*}loc") if loc.text]
 		print(f"[INFO] Parsed {len(urls)} URLs from raw XML.")
-
+		now = datetime.now(timezone(timedelta(hours=-5)))
 		with self.db.cursor() as cur:
 			execute_values(cur, """
 				insert into gringo.sitemap_cache(url,fetched_at)
 				values %s
 				on conflict(url) do update
 				set fetched_at = excluded.fetched_at
-			""", [(u, ) for u in urls])
+			""", [(u, now) for u in urls])
 			self.db.commit()
 			print("[DEBUG] Sitemap cache updated")
 

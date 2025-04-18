@@ -35,6 +35,10 @@ ubuntu@ip-172-31-31-222:~$ docker exec -it chatbot_sa_bot printenv | grep WEBHOO
 docker logs
 docker-compose logs -f db crawler
 
+docker debug after silent crash
+docker compose run --rm crawler bash
+python crawler.py
+
 run act
 act -j deploy --secret-file /home/noams/src/chatbot_sa/.env
 
