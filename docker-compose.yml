@@ -1,7 +1,7 @@
 services:
   db:
     env_file:
-      - .secrets/.env
+      - .env
     image: ankane/pgvector:latest
     container_name: vector_db
     environment:
@@ -17,7 +17,7 @@ services:
 
   bot:
     env_file:
-      - .secrets/.env
+      - .env
     build:
       context: ./bot
       dockerfile: Dockerfile
@@ -42,7 +42,7 @@ services:
 
   crawler:
     env_file:
-      - .secrets/.env
+      - .env
     build:
       context: ./crawlers/gringo
       dockerfile: Dockerfile

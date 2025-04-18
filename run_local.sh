@@ -2,7 +2,7 @@
 
 # Load environment variables
 set -a
-source .secrets/.env
+source .env
 set +a
 
 # Stop and remove existing container
