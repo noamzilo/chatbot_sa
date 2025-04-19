@@ -24,19 +24,24 @@ logging.basicConfig(
 	datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-def get_db(retries=5, delay=2):
+def get_db(retries=10, delay=2):
 	for i in range(retries):
 		try:
-			return psycopg2.connect(
+			conn = psycopg2.connect(
 				dbname	=os.getenv("POSTGRES_DB"),
 				user	=os.getenv("POSTGRES_USER"),
 				password=os.getenv("POSTGRES_PASSWORD"),
 				host	=os.getenv("POSTGRES_HOST"),
 				port	=os.getenv("POSTGRES_PORT"),
 			)
+			return conn
 		except psycopg2.OperationalError as e:
-			if i < retries - 1:
+			if "does not exist" in str(e):
+				logging.warning(f"Database doesn't exist yet, retrying in {delay}s…")
+			else:
 				logging.warning(f"DB not ready, retrying in {delay}s…")
+
+			if i < retries - 1:
 				time.sleep(delay)
 			else:
 				raise

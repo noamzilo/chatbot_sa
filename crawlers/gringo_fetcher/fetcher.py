@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-Gringo Fetcher v2
+Gringo Fetcher
 
-- Downloads the sitemap from URL
-- Truncates the XML before parsing
-- Writes to local `parsed_sitemap.xml`
-- Uses SitemapLoader on the reduced file
+- Downloads sitemap
+- Extracts first N URLs
+- Uses SitemapLoader with filter
 - Fetches HTML and stores in gringo.raw_pages
 """
 
@@ -16,10 +15,9 @@ from langchain_community.document_loaders import SitemapLoader
 
 # ───────────────────────── CONFIG ─────────────────────────
 SITEMAP_URL		= "https://gringo.co.il/sitemap.xml"
-SITEMAP_TTL		= 7 * 24 * 3600
+SITEMAP_TTL		= 24 * 7 * 3600
 MAX_PAGES		= 10
 HEADERS			= {"User-Agent": "Mozilla/5.0 (GringoFetcher/1.0)"}
-PARSED_SITEMAP	= "/app/parsed_sitemap.xml"
 # ──────────────────────────────────────────────────────────
 PROJECT_ROOT	= os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
@@ -30,79 +28,79 @@ logging.basicConfig(
 	datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-def get_db(retries=5, delay=2):
+def get_db(retries=10, delay=2):
 	for i in range(retries):
 		try:
-			return psycopg2.connect(
+			conn = psycopg2.connect(
 				dbname	=os.getenv("POSTGRES_DB"),
 				user	=os.getenv("POSTGRES_USER"),
 				password=os.getenv("POSTGRES_PASSWORD"),
 				host	=os.getenv("POSTGRES_HOST"),
 				port	=os.getenv("POSTGRES_PORT"),
 			)
-		except psycopg2.OperationalError:
-			if i < retries - 1:
+			return conn
+		except psycopg2.OperationalError as e:
+			if "does not exist" in str(e):
+				logging.warning(f"Database doesn't exist yet, retrying in {delay}s…")
+			else:
 				logging.warning(f"DB not ready, retrying in {delay}s…")
+			if i < retries - 1:
 				time.sleep(delay)
 			else:
 				raise
 
-def download_and_save_truncated_sitemap():
-	logging.info(f"Downloading sitemap: {SITEMAP_URL}")
-	resp = requests.get(SITEMAP_URL, timeout=15, headers=HEADERS)
+def get_first_n_urls_from_sitemap(url: str, n: int) -> set[str]:
+	logging.info(f"Downloading sitemap: {url}")
+	resp = requests.get(url, timeout=15, headers=HEADERS)
 	resp.raise_for_status()
-
 	root = ET.fromstring(resp.content)
 	ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
-	urls = root.findall("sm:url", ns)
-
-	logging.info(f"Original sitemap contains {len(urls)} URLs")
-
-	if MAX_PAGES < len(urls):
-		urls = urls[:MAX_PAGES]
-
-	new_root = ET.Element("urlset", {
-		"xmlns": "http://www.sitemaps.org/schemas/sitemap/0.9"
-	})
-	for url in urls:
-		new_root.append(url)
-
-	ET.ElementTree(new_root).write(PARSED_SITEMAP, encoding="utf-8", xml_declaration=True)
-	logging.info(f"Truncated sitemap saved to {PARSED_SITEMAP} ({len(urls)} URLs)")
+	url_tags = root.findall("sm:url", ns)
+	locs = set()
+	for tag in url_tags:
+		loc = tag.find("sm:loc", ns)
+		if loc is not None and loc.text:
+			locs.add(loc.text.strip())
+		if len(locs) >= n:
+			break
+	logging.info(f"Loaded {len(locs)} URLs from sitemap")
+	return locs
 
 def crawl_once():
-	download_and_save_truncated_sitemap()
+	subset = get_first_n_urls_from_sitemap(SITEMAP_URL, MAX_PAGES)
+	loader = SitemapLoader(
+		web_path=SITEMAP_URL,
+		filter_urls=lambda url: url in subset
+	)
+	docs = loader.load()
+	logging.info(f"SitemapLoader returned {len(docs)} docs")
 
 	db = get_db()
 	db.autocommit = True
 	cur = db.cursor()
 
-	loader = SitemapLoader(web_path=f"file://{PARSED_SITEMAP}")
-	docs = loader.load()
-	logging.info(f"SitemapLoader returned {len(docs)} docs")
-
 	for doc in docs:
-		url = doc.metadata.get("loc") or doc.metadata.get("source") or ""
+		url = doc.metadata.get("source") or doc.metadata.get("loc") or ""
 		if not url:
 			continue
-		try:
-			resp = requests.get(url, timeout=15, headers=HEADERS)
-			resp.raise_for_status()
-		except Exception as e:
-			logging.warning(f"[SKIP] {url} → {e}")
+		html = doc.page_content
+		if not html.strip():
+			logging.warning(f"[SKIP] {url} → empty content")
 			continue
-
-		cur.execute(
-			"""
-			insert into gringo.raw_pages(url, html)
-			values (%s, %s)
-			on conflict(url) do update
-			set html = excluded.html,
-				fetched_at = current_timestamp
-			""",
-			(url, resp.text),
-		)
-		logging.info(f"[OK] Cached {url}")
+		try:
+			cur.execute(
+				"""
+				insert into gringo.raw_pages(url, html)
+				values (%s, %s)
+				on conflict(url) do update
+				set html = excluded.html,
+					fetched_at = current_timestamp
+				""",
+				(url, html),
+			)
+			logging.info(f"[OK] Cached {url}")
+		except Exception as e:
+			logging.error(f"[FAIL] DB error for {url} → {e}")
 
 	cur.close()
 	db.close()
