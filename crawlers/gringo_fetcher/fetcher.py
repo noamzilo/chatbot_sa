@@ -1,13 +1,4 @@
 #!/usr/bin/env python3
-"""
-Gringo Fetcher
-
-- Downloads sitemap
-- Extracts first N URLs
-- Uses SitemapLoader with filter_urls
-- Fetches HTML and stores in gringo.raw_pages
-"""
-
 import os
 import time
 import logging
@@ -45,10 +36,7 @@ def get_db(retries=10, delay=2):
 			)
 			return conn
 		except psycopg2.OperationalError as e:
-			if "does not exist" in str(e):
-				logging.warning(f"Database doesn't exist yet, retrying in {delay}s…")
-			else:
-				logging.warning(f"DB not ready, retrying in {delay}s…")
+			logging.warning(f"DB not ready, retrying in {delay}s… ({e})")
 			if i < retries - 1:
 				time.sleep(delay)
 			else:
@@ -72,14 +60,22 @@ def get_first_n_urls_from_sitemap(url: str, n: int) -> list[str]:
 	return locs
 
 def crawl_once():
-	subset = get_first_n_urls_from_sitemap(SITEMAP_URL, MAX_PAGES)
-	# Escape dots in URLs to match literal dots in regex
-	escaped_urls = [re.escape(url) for url in subset]
+	urls = get_first_n_urls_from_sitemap(SITEMAP_URL, MAX_PAGES)
+	logging.info("Selected URLs:")
+	for u in urls:
+		logging.info(f"  - {u}")
+
+	escaped = [re.escape(url) for url in urls]
+	logging.info("Regex filters used:")
+	for e in escaped:
+		logging.info(f"  - {e}")
+
 	loader = SitemapLoader(
 		web_path=SITEMAP_URL,
-		filter_urls=escaped_urls,
+		filter_urls=escaped,
 		restrict_to_same_domain=False
 	)
+
 	docs = loader.load()
 	logging.info(f"SitemapLoader returned {len(docs)} docs")
 
@@ -89,13 +85,15 @@ def crawl_once():
 
 	for doc in docs:
 		url = doc.metadata.get("source") or doc.metadata.get("loc") or ""
-		if not url:
-			continue
 		html = doc.page_content
+		if not url:
+			logging.warning("[SKIP] No URL in doc")
+			continue
 		if not html.strip():
 			logging.warning(f"[SKIP] {url} → empty content")
 			continue
 		try:
+			logging.info(f"[INSERT] {url} → {len(html)} chars")
 			cur.execute(
 				"""
 				INSERT INTO gringo.raw_pages(url, html)
@@ -106,7 +104,6 @@ def crawl_once():
 				""",
 				(url, html),
 			)
-			logging.info(f"[OK] Cached {url}")
 		except Exception as e:
 			logging.error(f"[FAIL] DB error for {url} → {e}")
 
@@ -115,11 +112,4 @@ def crawl_once():
 	logging.info("Fetch pass complete ✔")
 
 if __name__ == "__main__":
-	while True:
-		try:
-			crawl_once()
-			logging.info(f"Sleeping {SITEMAP_TTL // 3600} h…")
-			time.sleep(SITEMAP_TTL)
-		except Exception as e:
-			logging.exception(e)
-			time.sleep(300)
+	crawl_once()

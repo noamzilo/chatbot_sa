@@ -43,7 +43,12 @@ run act
 act -j deploy --secret-file /home/noams/src/chatbot_sa/.env
 
 Connect to db
-docker exec -it vector_db psql -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-chatbot_sa}
+set -a; source /home/noams/src/chatbot_sa/.env; set +a; docker exec -it vector_db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+
+db sanity
+set -a; source /home/noams/src/chatbot_sa/.env; set +a; docker exec -i vector_db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT COUNT(*) FROM gringo.raw_pages;"
+set -a; source /home/noams/src/chatbot_sa/.env; set +a; docker exec -i vector_db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT id, url, length(html) FROM gringo.raw_pages ORDER BY id ASC LIMIT 10;"
+
 
 Aws ECR details
 {
