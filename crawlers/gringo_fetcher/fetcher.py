@@ -70,13 +70,20 @@ def crawl_once():
 	for e in escaped:
 		logging.info(f"  - {e}")
 
+	logging.info("About to load docs:")
 	loader = SitemapLoader(
 		web_path=SITEMAP_URL,
-		filter_urls=escaped,
+		blocksize=10,         # Load only 10
+		blocknum=0,           # First block
 		restrict_to_same_domain=False
 	)
-
+	logging.info("Loading docs:")
+	# docs = loader.load()
 	docs = loader.load()
+	logging.info(f"SitemapLoader returned {len(docs)} docs")
+	for doc in docs:
+		logging.info(f"[DOC] {doc.metadata.get('source') or doc.metadata.get('loc')}")
+
 	logging.info(f"SitemapLoader returned {len(docs)} docs")
 
 	db = get_db()
