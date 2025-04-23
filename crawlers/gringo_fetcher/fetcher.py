@@ -19,10 +19,19 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 logging.basicConfig(
-	level=logging.INFO,
+	level=logging.DEBUG,
 	format="%(asctime)s [FETCHER] %(levelname)s ▶ %(message)s",
 	datefmt="%Y-%m-%d %H:%M:%S",
 )
+
+def compress_html(html: str) -> str:
+	"""Compress HTML by removing excess whitespace and newlines."""
+	if not html:
+		return ""
+	# Remove multiple whitespaces and newlines
+	compressed = re.sub(r'\s+', ' ', html).strip()
+	# Truncate if too long
+	return compressed[:200] + '...' if len(compressed) > 200 else compressed
 
 def get_db(retries=10, delay=2):
 	for i in range(retries):
@@ -59,48 +68,58 @@ def get_first_n_urls_from_sitemap(url: str, n: int) -> list[str]:
 	logging.info(f"Loaded {len(locs)} URLs from sitemap")
 	return locs
 
+def safe_parsing(bs):
+	if bs is None:
+		return ""
+	try:
+		return str(bs.get_text())
+	except Exception as e:
+		logging.warning(f"[PARSE FAIL] Could not extract text: {e}")
+		return ""
+
 def crawl_once():
-	urls = get_first_n_urls_from_sitemap(SITEMAP_URL, MAX_PAGES)
-	logging.info("Selected URLs:")
-	for u in urls:
-		logging.info(f"  - {u}")
-
-	escaped = [re.escape(url) for url in urls]
-	logging.info("Regex filters used:")
-	for e in escaped:
-		logging.info(f"  - {e}")
-
-	logging.info("About to load docs:")
+	logging.info(f"Loading first {MAX_PAGES} pages via blocksize…")
 	loader = SitemapLoader(
 		web_path=SITEMAP_URL,
-		blocksize=10,         # Load only 10
-		blocknum=0,           # First block
-		restrict_to_same_domain=False
+		blocksize=MAX_PAGES,
+		blocknum=0,
+		restrict_to_same_domain=False,
+		parsing_function=safe_parsing
 	)
-	logging.info("Loading docs:")
-	# docs = loader.load()
-	docs = loader.load()
-	logging.info(f"SitemapLoader returned {len(docs)} docs")
-	for doc in docs:
-		logging.info(f"[DOC] {doc.metadata.get('source') or doc.metadata.get('loc')}")
 
+	docs = loader.load()
 	logging.info(f"SitemapLoader returned {len(docs)} docs")
 
 	db = get_db()
 	db.autocommit = True
 	cur = db.cursor()
 
-	for doc in docs:
+	for i, doc in enumerate(docs):
 		url = doc.metadata.get("source") or doc.metadata.get("loc") or ""
 		html = doc.page_content
+
 		if not url:
 			logging.warning("[SKIP] No URL in doc")
 			continue
+
 		if not html.strip():
 			logging.warning(f"[SKIP] {url} → empty content")
 			continue
+
+		# Log compressed HTML preview
+		logging.info(f"[INSERT] {url} → {len(html)} chars")
+		logging.debug(f"[HTML PREVIEW] {url} → {compress_html(html)}")
+
 		try:
-			logging.info(f"[INSERT] {url} → {len(html)} chars")
+			# First verify the content
+			logging.debug(f"Content type: {type(html)}, Length: {len(html)}")
+			
+			# Ensure the HTML is properly encoded
+			if isinstance(html, str):
+				html_bytes = html.encode('utf-8')
+			else:
+				html_bytes = html
+
 			cur.execute(
 				"""
 				INSERT INTO gringo.raw_pages(url, html)
@@ -109,10 +128,12 @@ def crawl_once():
 				SET html = excluded.html,
 					fetched_at = current_timestamp
 				""",
-				(url, html),
+				(url, html_bytes),
 			)
+			db.commit()  # Explicitly commit each insertion
 		except Exception as e:
 			logging.error(f"[FAIL] DB error for {url} → {e}")
+			logging.error(f"HTML content causing error: {compress_html(html)}")
 
 	cur.close()
 	db.close()
