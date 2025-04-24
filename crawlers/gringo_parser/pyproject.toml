@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "gringo-crawler"
+version = "0.1.0"
+description = "Crawler & Parser for gringo.co.il"
+authors = ["Noam Salomonski <noamzilo@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+langchain-core = "^0.3.54"
+langchain-community = "^0.3.0"
+langchain-openai = "^0.3.14"
+fake-useragent = "^1.5.1"
+pgvector = "^0.2.3"
+psycopg2-binary = "^2.9.9"
+requests = "^2.31.0"
+beautifulsoup4 = "^4.12.3"
+lxml = "^4.9.3"
+tqdm = "^4.66.2"
+python-dotenv = "^1.0.1"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

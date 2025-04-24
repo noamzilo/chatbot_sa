@@ -13,7 +13,7 @@ chmod 600 key.pem
 ssh -o StrictHostKeyChecking=no -i key.pem $EC2_USER@$EC2_HOST << 'EOF'
   set -e
   cd ~/chatbot_sa
-  echo "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN" > .secrets/.env
+  echo "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN" > .env
   docker-compose down
   docker-compose up -d --build
 EOF

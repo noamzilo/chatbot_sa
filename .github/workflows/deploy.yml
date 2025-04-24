@@ -65,8 +65,7 @@ jobs:
         run: |
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "sudo mkdir -p /home/${{ secrets.EC2_USER }}/chatbot_sa && \
-             sudo chown ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /home/${{ secrets.EC2_USER }}/chatbot_sa"
+            "sudo chown -R ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /home/${{ secrets.EC2_USER }}/chatbot_sa"
 
       - name: Upload docker-compose.yml
         run: |
@@ -76,16 +75,24 @@ jobs:
 
       - name: Create and upload .env file
         run: |
+          mkdir -p /tmp/
           echo "EC2_HOST=${{ secrets.EC2_HOST }}" > /tmp/.env
           echo "EC2_USER=${{ secrets.EC2_USER }}" >> /tmp/.env
           echo "EC2_SSH_KEY_B64=${{ secrets.EC2_SSH_KEY_B64 }}" >> /tmp/.env
           echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> /tmp/.env
           echo "TELEGRAM_WEBHOOK_MODE=${{ secrets.TELEGRAM_WEBHOOK_MODE }}" >> /tmp/.env
           echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> /tmp/.env
-          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> /tmp/.env
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> /tmp/env
           echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> /tmp/.env
           echo "ECR_REGISTRY=${{ secrets.ECR_REGISTRY }}" >> /tmp/.env
           echo "ECR_REPOSITORY=${{ secrets.ECR_REPOSITORY }}" >> /tmp/.env
+          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> /tmp/.env
+          echo "POSTGRES_USER=postgres" >> /tmp/.env
+          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> /tmp/.env
+          echo "POSTGRES_DB=chatbot_sa" >> /tmp/.env
+          echo "POSTGRES_HOST=db" >> /tmp/.env
+          echo "POSTGRES_PORT=5432" >> /tmp/.env
+
           scp -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             /tmp/.env \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/chatbot_sa/.env
@@ -118,8 +125,7 @@ jobs:
             "cd /home/${{ secrets.EC2_USER }}/chatbot_sa && \
              aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
                | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }} && \
-             docker-compose --env-file .env pull && \
-             docker-compose --env-file .env up -d"
+             docker-compose up -d"
 
       - name: Configure EC2 Security Group
         run: |
@@ -168,6 +174,5 @@ jobs:
             "curl -v http://localhost:8000/health"
 
           echo "Testing health endpoint from public IP..."
-          # This may time out when running under 'act' locally
           curl -v "http://${{ secrets.EC2_HOST }}:8000/health"
         continue-on-error: false

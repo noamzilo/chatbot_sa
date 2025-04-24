@@ -19,18 +19,36 @@ docker build -t chatbot_sa_bot bot/
 
 docker run
 docker run --rm -it \
-	--env-file /home/noams/src/chatbot_sa/.secrets/.env \
+	--env-file /home/noams/src/chatbot_sa/.env \
 	--name chatbot_sa_bot \
 	chatbot_sa_bot
 
 docker compose
-docker-compose --env-file .secrets/.env up --build
+docker compose --env-file .env up --build
+
+docker compose run crawler
+docker compose --env-file .env up -d db crawler
 
 docker poll env variable
 ubuntu@ip-172-31-31-222:~$ docker exec -it chatbot_sa_bot printenv | grep WEBHOOK_MODE
 
+docker logs
+docker-compose logs -f db crawler
+
+docker debug after silent crash
+docker compose run --rm crawler bash
+python crawler.py
+
 run act
-act -j deploy --secret-file /home/noams/src/chatbot_sa/.secrets/.env
+act -j deploy --secret-file /home/noams/src/chatbot_sa/.env
+
+Connect to db
+set -a; source /home/noams/src/chatbot_sa/.env; set +a; docker exec -it vector_db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+
+db sanity
+set -a; source /home/noams/src/chatbot_sa/.env; set +a; docker exec -i vector_db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT COUNT(*) FROM gringo.raw_pages;"
+set -a; source /home/noams/src/chatbot_sa/.env; set +a; docker exec -i vector_db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT id, url, length(html) FROM gringo.raw_pages ORDER BY id ASC LIMIT 10;"
+
 
 Aws ECR details
 {

@@ -1,7 +1,21 @@
-version: "3.8"
-
 services:
+  db:
+    env_file: .env
+    image: ankane/pgvector:latest
+    container_name: vector_db
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    restart: unless-stopped
+
   bot:
+    env_file: .env
     build:
       context: ./bot
       dockerfile: Dockerfile
@@ -13,6 +27,53 @@ services:
       - GIT_SSH_COMMAND=ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - WEBHOOK_MODE=${TELEGRAM_WEBHOOK_MODE}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+    depends_on:
+      - db
     ports:
       - "8000:8000"
     restart: unless-stopped
+
+  # ────────────────────────── NEW: FETCHER ──────────────────────────
+  gringo_fetcher:
+    env_file: .env
+    build:
+      context: ./crawlers/gringo_fetcher
+      dockerfile: Dockerfile
+    image: ${ECR_REGISTRY}/${ECR_REPOSITORY}_crawler:latest
+    container_name: gringo_fetcher
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+    depends_on:
+      - db
+    restart: on-failure
+
+  # ────────────────────────── NEW: PARSER ───────────────────────────
+  gringo_parser:
+    env_file: .env
+    build:
+      context: ./crawlers/gringo_parser
+      dockerfile: Dockerfile
+    image: ${ECR_REGISTRY}/${ECR_REPOSITORY}_parser:latest
+    container_name: gringo_parser
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    depends_on:
+      - db
+    restart: on-failure
+
+volumes:
+  pgdata:
