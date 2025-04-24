@@ -2,17 +2,17 @@
 """
 Gringo Parser
 Step 2 → read uncached rows from gringo.raw_pages, parse, embed,
-store in gringo.documents. Loops forever.
+store in gringo.documents. Triggered by fetcher completion.
 """
 
-import os, time, logging, psycopg2, json
+import os, logging, psycopg2, json
 from dotenv import load_dotenv
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
+import redis
 
 CHUNK_SIZE          = 1000
 CHUNK_OVERLAP       = 200
-BATCH_SLEEP         = 7 * 24 * 3600          # run every week
 
 PROJECT_ROOT    = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
@@ -44,6 +44,14 @@ def get_db(retries=10, delay=2):
 				time.sleep(delay)
 			else:
 				raise
+
+def get_redis():
+	return redis.Redis(
+		host=os.getenv("REDIS_HOST", "localhost"),
+		port=int(os.getenv("REDIS_PORT", 6379)),
+		db=0,
+		decode_responses=True
+	)
 
 splitter    = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
 embedder    = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
@@ -104,11 +112,14 @@ def parse_once():
 	logging.info("Batch finished ✔")
 
 if __name__ == "__main__":
-	while True:
-		try:
+	r = get_redis()
+	pubsub = r.pubsub()
+	pubsub.subscribe('gringo:fetcher:done')
+	
+	logging.info("Parser started, waiting for fetcher completion signal...")
+	
+	for message in pubsub.listen():
+		if message['type'] == 'message':
+			logging.info("Received fetcher completion signal, starting parse...")
 			parse_once()
-			logging.info(f"Sleeping {BATCH_SLEEP//60} min…")
-			time.sleep(BATCH_SLEEP)
-		except Exception as e:
-			logging.exception(e)
-			time.sleep(300)
+			logging.info("Parse complete, waiting for next signal...")

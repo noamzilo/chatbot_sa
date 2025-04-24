@@ -4,6 +4,7 @@ import time
 import logging
 import requests
 import psycopg2
+import redis
 from dotenv import load_dotenv
 from xml.etree import ElementTree as ET
 from langchain_community.document_loaders import SitemapLoader
@@ -24,6 +25,14 @@ logging.basicConfig(
 	format="%(asctime)s [FETCHER] %(levelname)s ▶ %(message)s",
 	datefmt="%Y-%m-%d %H:%M:%S",
 )
+
+def get_redis():
+	return redis.Redis(
+		host=os.getenv("REDIS_HOST", "localhost"),
+		port=int(os.getenv("REDIS_PORT", 6379)),
+		db=0,
+		decode_responses=True
+	)
 
 def get_db(retries=10, delay=2):
 	for i in range(retries):
@@ -138,3 +147,7 @@ def crawl_once():
 
 if __name__ == "__main__":
 	crawl_once()
+	# Signal parser that we're done
+	r = get_redis()
+	r.publish('gringo:fetcher:done', '1')
+	logging.info("Sent completion signal to parser")
