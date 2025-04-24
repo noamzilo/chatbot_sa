@@ -57,8 +57,13 @@ splitter    = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overla
 embedder    = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
 
 def parse_once():
-	db  = get_db()
+	db = get_db()
 	cur = db.cursor()
+
+	# First check if we have any raw pages at all
+	cur.execute("SELECT COUNT(*) FROM gringo.raw_pages")
+	total_pages = cur.fetchone()[0]
+	logging.info(f"Total raw pages in database: {total_pages}")
 
 	cur.execute(
 		"""
@@ -70,6 +75,13 @@ def parse_once():
 	)
 	rows = cur.fetchall()
 	logging.info(f"Found {len(rows)} pages to embed")
+	
+	if len(rows) == 0 and total_pages > 0:
+		logging.warning("No pages to embed but raw_pages table is not empty. This might indicate all pages are already embedded.")
+		# Check if we have any documents
+		cur.execute("SELECT COUNT(*) FROM gringo.documents")
+		doc_count = cur.fetchone()[0]
+		logging.info(f"Total documents in database: {doc_count}")
 
 	for raw_id, url, html in rows:
 		try:

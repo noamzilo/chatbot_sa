@@ -25,9 +25,10 @@ docker run --rm -it \
 
 docker compose
 docker compose --env-file .env up --build
+docker compose --env-file .env up gringo_fetcher gringo_parser redis db --build
 
 docker compose run crawler
-docker compose --env-file .env up -d db crawler
+docker compose --env-file .env up -d db gringo_crawler
 
 docker poll env variable
 ubuntu@ip-172-31-31-222:~$ docker exec -it chatbot_sa_bot printenv | grep WEBHOOK_MODE
