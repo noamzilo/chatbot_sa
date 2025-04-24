@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
 """
-Gringo Parser
-Step 2 → read uncached rows from gringo.raw_pages, parse, embed,
+Gringo Parser
+Step 2 → read uncached rows from gringo.raw_pages, parse, embed,
 store in gringo.documents. Loops forever.
 """
 
-import os, time, logging, psycopg2
+import os, time, logging, psycopg2, json
 from dotenv import load_dotenv
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
-from bs4 import BeautifulSoup
 
-CHUNK_SIZE			= 1000
-CHUNK_OVERLAP		= 200
-BATCH_SLEEP			= 1800			# run every 30 min
+CHUNK_SIZE          = 1000
+CHUNK_OVERLAP       = 200
+BATCH_SLEEP         = 7 * 24 * 3600          # run every week
 
-PROJECT_ROOT	= os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+PROJECT_ROOT    = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 logging.basicConfig(
@@ -28,11 +27,11 @@ def get_db(retries=10, delay=2):
 	for i in range(retries):
 		try:
 			conn = psycopg2.connect(
-				dbname	=os.getenv("POSTGRES_DB"),
-				user	=os.getenv("POSTGRES_USER"),
+				dbname  =os.getenv("POSTGRES_DB"),
+				user    =os.getenv("POSTGRES_USER"),
 				password=os.getenv("POSTGRES_PASSWORD"),
-				host	=os.getenv("POSTGRES_HOST"),
-				port	=os.getenv("POSTGRES_PORT"),
+				host    =os.getenv("POSTGRES_HOST"),
+				port    =os.getenv("POSTGRES_PORT"),
 			)
 			return conn
 		except psycopg2.OperationalError as e:
@@ -46,13 +45,12 @@ def get_db(retries=10, delay=2):
 			else:
 				raise
 
-
-splitter	= RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
-embedder	= OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
+splitter    = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
+embedder    = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
 
 def parse_once():
-	db	= get_db()
-	cur	= db.cursor()
+	db  = get_db()
+	cur = db.cursor()
 
 	cur.execute(
 		"""
@@ -66,31 +64,40 @@ def parse_once():
 	logging.info(f"Found {len(rows)} pages to embed")
 
 	for raw_id, url, html in rows:
-		soup	= BeautifulSoup(html, "lxml")
-		title	= soup.title.string if soup.title else ""
-		text	= soup.get_text("\n", strip=True)
-		if not text:
-			logging.warning(f"Skip empty {url}")
+		try:
+			# Parse the JSON content from fetcher
+			content_data = json.loads(html)
+			title = content_data.get("title", "")
+			text = content_data.get("content", "")
+			
+			if not text:
+				logging.warning(f"Skip empty content for {url}")
+				continue
+
+			chunks = splitter.split_text(text)
+			vector = embedder.embed_query("\n\n".join(chunks))
+
+			cur.execute(
+				"""
+				insert into gringo.documents(url, title, content, embedding, raw_page_id)
+				values (%s,%s,%s,%s,%s)
+				on conflict(url) do update
+				set title=excluded.title,
+					content=excluded.content,
+					embedding=excluded.embedding,
+					raw_page_id=excluded.raw_page_id,
+					updated_at=current_timestamp
+				""",
+				(url, title, text, vector, raw_id),
+			)
+			db.commit()
+			logging.info(f"Embedded {url}")
+		except json.JSONDecodeError as e:
+			logging.error(f"Failed to parse JSON for {url}: {e}")
 			continue
-
-		chunks = splitter.split_text(text)
-		vector = embedder.embed_query("\n\n".join(chunks))
-
-		cur.execute(
-			"""
-			insert into gringo.documents(url, title, content, embedding, raw_page_id)
-			values (%s,%s,%s,%s,%s)
-			on conflict(url) do update
-			set title=excluded.title,
-				content=excluded.content,
-				embedding=excluded.embedding,
-				raw_page_id=excluded.raw_page_id,
-				updated_at=current_timestamp
-			""",
-			(url, title, text, vector, raw_id),
-		)
-		db.commit()
-		logging.info(f"Embedded {url}")
+		except Exception as e:
+			logging.error(f"Error processing {url}: {e}")
+			continue
 
 	cur.close()
 	db.close()
@@ -100,7 +107,7 @@ if __name__ == "__main__":
 	while True:
 		try:
 			parse_once()
-			logging.info(f"Sleeping {BATCH_SLEEP//60} min…")
+			logging.info(f"Sleeping {BATCH_SLEEP//60} min…")
 			time.sleep(BATCH_SLEEP)
 		except Exception as e:
 			logging.exception(e)
