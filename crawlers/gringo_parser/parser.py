@@ -67,7 +67,7 @@ def parse_once():
 
 	cur.execute(
 		"""
-		select rp.id, rp.url, rp.html
+		select rp.id, rp.url, rp.relevant_content
 		from gringo.raw_pages rp
 		left join gringo.documents d on rp.id = d.raw_page_id
 		where d.id is null

@@ -129,10 +129,10 @@ def crawl_once():
 		try:
 			cur.execute(
 				"""
-				INSERT INTO gringo.raw_pages(url, html)
+				INSERT INTO gringo.raw_pages(url, relevant_content)
 				VALUES (%s, %s)
 				ON CONFLICT(url) DO UPDATE
-				SET html = excluded.html,
+				SET relevant_content = excluded.relevant_content,
 					fetched_at = current_timestamp
 				""",
 				(url, html),

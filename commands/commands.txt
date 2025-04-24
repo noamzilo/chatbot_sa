@@ -25,7 +25,10 @@ docker run --rm -it \
 
 docker compose
 docker compose --env-file .env up --build
-docker compose --env-file .env up gringo_fetcher gringo_parser redis db --build
+docker compose --env-file .env up gringo_fetcher gringo_parser redis db rag_api --build
+
+docker compose down
+docker compose down -v
 
 docker compose run crawler
 docker compose --env-file .env up -d db gringo_crawler
