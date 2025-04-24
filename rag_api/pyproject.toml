@@ -1,16 +1,19 @@
 [project]
-name = "telegram_bot"
+name = "rag_api"
 version = "0.1.0"
-description = "Telegram bot with RAG capabilities"
+description = "RAG API service for document querying"
 authors = [
     {name = "Your Name", email = "your.email@example.com"}
 ]
 dependencies = [
-    "python-telegram-bot>=20.7",
     "fastapi>=0.109.2",
     "uvicorn>=0.27.1",
+    "psycopg2-binary>=2.9.9",
     "python-dotenv>=1.0.1",
-    "requests>=2.31.0"
+    "openai>=1.12.0",
+    "numpy>=1.26.4",
+    "python-multipart>=0.0.9",
+    "pydantic>=2.6.1"
 ]
 
 [build-system]
@@ -22,4 +25,4 @@ line-length = 88
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "B", "I"]
+select = ["E", "F", "B", "I"] 
