@@ -4,10 +4,11 @@ import time
 import logging
 import requests
 import psycopg2
-import re
 from dotenv import load_dotenv
 from xml.etree import ElementTree as ET
 from langchain_community.document_loaders import SitemapLoader
+from bs4 import BeautifulSoup
+import json
 
 # ───────────────────────── CONFIG ─────────────────────────
 SITEMAP_URL = "https://gringo.co.il/sitemap.xml"
@@ -23,15 +24,6 @@ logging.basicConfig(
 	format="%(asctime)s [FETCHER] %(levelname)s ▶ %(message)s",
 	datefmt="%Y-%m-%d %H:%M:%S",
 )
-
-def compress_html(html: str) -> str:
-	"""Compress HTML by removing excess whitespace and newlines."""
-	if not html:
-		return ""
-	# Remove multiple whitespaces and newlines
-	compressed = re.sub(r'\s+', ' ', html).strip()
-	# Truncate if too long
-	return compressed[:200] + '...' if len(compressed) > 200 else compressed
 
 def get_db(retries=10, delay=2):
 	for i in range(retries):
@@ -72,7 +64,21 @@ def safe_parsing(bs):
 	if bs is None:
 		return ""
 	try:
-		return str(bs.get_text())
+		# Extract h1 title
+		h1 = bs.find('h1')
+		title = " ".join(h1.stripped_strings) if h1 else ""
+		
+		# Extract main content from section.text-body
+		content_section = bs.find('section', class_='text-body')
+		content = " ".join(content_section.stripped_strings) if content_section else ""
+		
+		# Create JSON structure
+		result = json.dumps({
+			"title": title,
+			"content": content
+		}, ensure_ascii=False)
+		
+		return result
 	except Exception as e:
 		logging.warning(f"[PARSE FAIL] Could not extract text: {e}")
 		return ""
@@ -106,20 +112,12 @@ def crawl_once():
 			logging.warning(f"[SKIP] {url} → empty content")
 			continue
 
-		# Log compressed HTML preview
+		# Log a preview of the processed content
+		preview = html[:100].replace('\n', ' ').strip()
 		logging.info(f"[INSERT] {url} → {len(html)} chars")
-		logging.debug(f"[HTML PREVIEW] {url} → {compress_html(html)}")
+		logging.debug(f"[CONTENT PREVIEW] {url} → {preview}...")
 
 		try:
-			# First verify the content
-			logging.debug(f"Content type: {type(html)}, Length: {len(html)}")
-			
-			# Ensure the HTML is properly encoded
-			if isinstance(html, str):
-				html_bytes = html.encode('utf-8')
-			else:
-				html_bytes = html
-
 			cur.execute(
 				"""
 				INSERT INTO gringo.raw_pages(url, html)
@@ -128,12 +126,11 @@ def crawl_once():
 				SET html = excluded.html,
 					fetched_at = current_timestamp
 				""",
-				(url, html_bytes),
+				(url, html),
 			)
-			db.commit()  # Explicitly commit each insertion
 		except Exception as e:
 			logging.error(f"[FAIL] DB error for {url} → {e}")
-			logging.error(f"HTML content causing error: {compress_html(html)}")
+			logging.error(f"Content type: {type(html)}, Length: {len(html)}")
 
 	cur.close()
 	db.close()
