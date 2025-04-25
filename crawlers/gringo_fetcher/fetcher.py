@@ -129,10 +129,10 @@ def crawl_once():
 		try:
 			cur.execute(
 				"""
-				INSERT INTO gringo.raw_pages(url, html)
+				INSERT INTO gringo.raw_pages(url, relevant_content)
 				VALUES (%s, %s)
 				ON CONFLICT(url) DO UPDATE
-				SET html = excluded.html,
+				SET relevant_content = excluded.relevant_content,
 					fetched_at = current_timestamp
 				""",
 				(url, html),
@@ -146,8 +146,15 @@ def crawl_once():
 	logging.info("Fetch pass complete ✔")
 
 if __name__ == "__main__":
-	crawl_once()
-	# Signal parser that we're done
-	r = get_redis()
-	r.publish('gringo:fetcher:done', '1')
-	logging.info("Sent completion signal to parser")
+	while True:
+		try:
+			crawl_once()
+			# Signal parser that we're done
+			r = get_redis()
+			r.publish('gringo:fetcher:done', '1')
+			logging.info("Sent completion signal to parser")
+			# Sleep for 1 week before next run
+			time.sleep(604800)
+		except Exception as e:
+			logging.error(f"Error in fetcher main loop: {e}")
+			time.sleep(60)  # Sleep for 1 minute on error before retrying

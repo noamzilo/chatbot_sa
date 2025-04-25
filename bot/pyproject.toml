@@ -1,18 +1,25 @@
-[tool.poetry]
-name = "chatbot-sa"
+[project]
+name = "telegram_bot"
 version = "0.1.0"
-description = ""
-authors = ["Noam Salomonski"]
-readme = "README.md"
-packages = [{include = "chatbot_sa"}]
-
-[tool.poetry.dependencies]
-python = "^3.12"
-fastapi = "^0.110.0"
-six = "^1.17.0"
-python-telegram-bot = "^20.8"
-uvicorn = "^0.27.1"
+description = "Telegram bot with RAG capabilities"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+dependencies = [
+    "python-telegram-bot>=20.7",
+    "fastapi>=0.109.2",
+    "uvicorn>=0.27.1",
+    "python-dotenv>=1.0.1",
+    "requests>=2.31.0"
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I"]

@@ -32,9 +32,12 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Set image tag
+      - name: Set image tags
         id: vars
-        run: echo "IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "BOT_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest" >> "$GITHUB_OUTPUT"
+          echo "CRAWLER_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_crawler:latest" >> "$GITHUB_OUTPUT"
+          echo "PARSER_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_parser:latest" >> "$GITHUB_OUTPUT"
 
       - name: Install or Update AWS CLI (for act compatibility)
         run: |
@@ -47,18 +50,38 @@ jobs:
         run: |
           aws ecr get-login-password | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
 
-      - name: Pull existing image (if any) for build cache
+      - name: Pull existing images for build cache
         continue-on-error: true
         run: |
-          docker pull ${{ steps.vars.outputs.IMAGE }}
+          docker pull ${{ steps.vars.outputs.BOT_IMAGE }}
+          docker pull ${{ steps.vars.outputs.CRAWLER_IMAGE }}
+          docker pull ${{ steps.vars.outputs.PARSER_IMAGE }}
 
-      - name: Build and push Docker image to ECR
+      - name: Build and push bot image
         uses: docker/build-push-action@v3
         with:
           context: ./bot
           push: true
-          tags: ${{ steps.vars.outputs.IMAGE }}
-          cache-from: type=registry,ref=${{ steps.vars.outputs.IMAGE }}
+          tags: ${{ steps.vars.outputs.BOT_IMAGE }}
+          cache-from: type=registry,ref=${{ steps.vars.outputs.BOT_IMAGE }}
+          cache-to: type=inline
+
+      - name: Build and push crawler image
+        uses: docker/build-push-action@v3
+        with:
+          context: ./crawlers/gringo_fetcher
+          push: true
+          tags: ${{ steps.vars.outputs.CRAWLER_IMAGE }}
+          cache-from: type=registry,ref=${{ steps.vars.outputs.CRAWLER_IMAGE }}
+          cache-to: type=inline
+
+      - name: Build and push parser image
+        uses: docker/build-push-action@v3
+        with:
+          context: ./crawlers/gringo_parser
+          push: true
+          tags: ${{ steps.vars.outputs.PARSER_IMAGE }}
+          cache-from: type=registry,ref=${{ steps.vars.outputs.PARSER_IMAGE }}
           cache-to: type=inline
 
       - name: Prepare EC2 folder
@@ -82,7 +105,7 @@ jobs:
           echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> /tmp/.env
           echo "TELEGRAM_WEBHOOK_MODE=${{ secrets.TELEGRAM_WEBHOOK_MODE }}" >> /tmp/.env
           echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> /tmp/.env
-          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> /tmp/env
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> /tmp/.env
           echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> /tmp/.env
           echo "ECR_REGISTRY=${{ secrets.ECR_REGISTRY }}" >> /tmp/.env
           echo "ECR_REPOSITORY=${{ secrets.ECR_REPOSITORY }}" >> /tmp/.env
@@ -92,6 +115,8 @@ jobs:
           echo "POSTGRES_DB=chatbot_sa" >> /tmp/.env
           echo "POSTGRES_HOST=db" >> /tmp/.env
           echo "POSTGRES_PORT=5432" >> /tmp/.env
+          echo "REDIS_HOST=redis" >> /tmp/.env
+          echo "REDIS_PORT=6379" >> /tmp/.env
 
           scp -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             /tmp/.env \
@@ -141,32 +166,24 @@ jobs:
             --port 8000 \
             --cidr 0.0.0.0/0 || true
 
-      - name: Verify deployment (local + public IP)
+      - name: Verify deployment
         run: |
           echo "Checking container status..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
             "docker ps"
 
-          echo "Waiting for container to start..."
+          echo "Waiting for containers to start..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "sleep 5"
+            "sleep 10"
 
           echo "Checking container logs..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "docker logs chatbot_sa_bot"
-
-          echo "Checking network configuration..."
-          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "echo 'Listening ports:' && sudo ss -tulpn | grep 8000"
-
-          echo "Checking firewall status..."
-          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "echo 'UFW status:' && sudo ufw status"
+            "docker logs chatbot_sa_bot && \
+             docker logs gringo_fetcher && \
+             docker logs gringo_parser"
 
           echo "Testing health endpoint locally..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \

@@ -25,9 +25,14 @@ docker run --rm -it \
 
 docker compose
 docker compose --env-file .env up --build
+docker compose --env-file .env up rag_api --build
+docker compose --env-file .env up gringo_fetcher gringo_parser redis db rag_api --build
+
+docker compose down
+docker compose down -v
 
 docker compose run crawler
-docker compose --env-file .env up -d db crawler
+docker compose --env-file .env up -d db gringo_crawler
 
 docker poll env variable
 ubuntu@ip-172-31-31-222:~$ docker exec -it chatbot_sa_bot printenv | grep WEBHOOK_MODE
@@ -49,6 +54,8 @@ db sanity
 set -a; source /home/noams/src/chatbot_sa/.env; set +a; docker exec -i vector_db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT COUNT(*) FROM gringo.raw_pages;"
 set -a; source /home/noams/src/chatbot_sa/.env; set +a; docker exec -i vector_db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT id, url, length(html) FROM gringo.raw_pages ORDER BY id ASC LIMIT 10;"
 
+rag_api sanity
+curl -X POST http://localhost:8001/query -H "Content-Type: application/json" -d '{"query": "What is the Brazilian currency called and what is its symbol?", "limit": 5}'
 
 Aws ECR details
 {
