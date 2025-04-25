@@ -66,24 +66,33 @@ async def query_documents(request: QueryRequest):
 
         # Convert embedding to string format for pgvector
         embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
-        logger.info("Converted embedding to string format")
+        logger.info(f"Converted embedding to string format: {embedding_str[:100]}...")
 
         # Query the database
         logger.info("Querying database for similar documents...")
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 logger.info("Executing similarity search query...")
+                # First, let's check if we have any documents with embeddings
+                cur.execute("SELECT COUNT(*) as count FROM gringo.documents WHERE embedding IS NOT NULL")
+                result = cur.fetchone()
+                logger.info(f"Total documents with embeddings: {result['count']}")
+                
+                # Now execute the similarity search
                 cur.execute("""
                     SELECT 
                         id, url, title, content,
                         1 - (embedding <=> %s::vector) as similarity
                     FROM gringo.documents
-                    ORDER BY embedding <=> %s::vector
+                    WHERE embedding IS NOT NULL
+                    ORDER BY similarity DESC
                     LIMIT %s
-                """, (embedding_str, embedding_str, request.limit))
+                """, (embedding_str, request.limit))
                 
                 results = cur.fetchall()
                 logger.info(f"Found {len(results)} matching documents")
+                if results:
+                    logger.info(f"Similarity scores: {[r['similarity'] for r in results]}")
                 
         return [DocumentResponse(**doc) for doc in results]
     except Exception as e:
