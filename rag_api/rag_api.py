@@ -110,10 +110,14 @@ async def get_results(request: QueryRequest):
 async def query_documents(request: QueryRequest):
     """Endpoint that uses RAG to generate an answer based on the retrieved documents"""
     try:
+        logger.info(f"Starting RAG pipeline for query: {request.query}")
+        
         # Get similar documents
         documents = get_similar_documents(request.query, request.limit)
+        logger.info(f"Retrieved {len(documents)} relevant documents")
         
         if not documents:
+            logger.warning("No relevant documents found for query")
             return RAGResponse(
                 answer="I couldn't find any relevant information to answer your question.",
                 sources=[]
@@ -124,29 +128,41 @@ async def query_documents(request: QueryRequest):
             f"Source {i+1} (URL: {doc.url}):\n{doc.content}"
             for i, doc in enumerate(documents)
         ])
+        logger.info(f"Formatted context with {len(documents)} sources")
 
         # Create RAG prompt
         prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a helpful assistant that answers questions based on the provided context.
+            Generate a clear, concise answer in your own words based on the context.
+            Do not directly quote or reference the sources in your answer.
             If the answer cannot be found in the context, say "I couldn't find enough information to answer that question."
-            Always cite your sources using the source numbers provided.
-            Answer in the same language as the question."""),
-            ("human", """Context:
+            IMPORTANT: Always answer in the same language as the question and context. If the context is in Hebrew, answer in Hebrew.
+            Keep your answer focused and to the point."""),
+            ("human", """Context (in {context_language}):
             {context}
 
-            Question: {question}""")
+            Question (in {question_language}): {question}""")
         ])
+        logger.info("Created RAG prompt template")
 
         # Create RAG chain
         chain = (
-            {"context": lambda _: context, "question": RunnablePassthrough()}
+            {
+                "context": lambda _: context,
+                "context_language": lambda _: "Hebrew" if any('\u0590' <= c <= '\u05FF' for c in context) else "English",
+                "question_language": lambda x: "Hebrew" if any('\u0590' <= c <= '\u05FF' for c in x) else "English",
+                "question": RunnablePassthrough()
+            }
             | prompt
             | llm
             | StrOutputParser()
         )
+        logger.info("Created RAG chain")
 
         # Generate answer
+        logger.info("Generating answer using RAG chain...")
         answer = chain.invoke(request.query)
+        logger.info(f"Generated answer: {answer}")
         
         return RAGResponse(
             answer=answer,
