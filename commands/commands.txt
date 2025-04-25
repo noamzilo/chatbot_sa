@@ -25,6 +25,7 @@ docker run --rm -it \
 
 docker compose
 docker compose --env-file .env up --build
+docker compose --env-file .env up rag_api --build
 docker compose --env-file .env up gringo_fetcher gringo_parser redis db rag_api --build
 
 docker compose down
