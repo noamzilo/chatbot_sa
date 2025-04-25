@@ -45,6 +45,7 @@ docker compose run --rm crawler bash
 python crawler.py
 
 run act
+cd ~/src/chatbot_sa && \
 act -j deploy --secret-file /home/noams/src/chatbot_sa/.env
 
 Connect to db

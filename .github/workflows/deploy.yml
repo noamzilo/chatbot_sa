@@ -38,6 +38,7 @@ jobs:
           echo "BOT_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest" >> "$GITHUB_OUTPUT"
           echo "CRAWLER_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_crawler:latest" >> "$GITHUB_OUTPUT"
           echo "PARSER_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_parser:latest" >> "$GITHUB_OUTPUT"
+          echo "API_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_api:latest" >> "$GITHUB_OUTPUT"
 
       - name: Install or Update AWS CLI (for act compatibility)
         run: |
@@ -56,6 +57,7 @@ jobs:
           docker pull ${{ steps.vars.outputs.BOT_IMAGE }}
           docker pull ${{ steps.vars.outputs.CRAWLER_IMAGE }}
           docker pull ${{ steps.vars.outputs.PARSER_IMAGE }}
+          docker pull ${{ steps.vars.outputs.API_IMAGE }}
 
       - name: Build and push bot image
         uses: docker/build-push-action@v3
@@ -82,6 +84,15 @@ jobs:
           push: true
           tags: ${{ steps.vars.outputs.PARSER_IMAGE }}
           cache-from: type=registry,ref=${{ steps.vars.outputs.PARSER_IMAGE }}
+          cache-to: type=inline
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v3
+        with:
+          context: ./rag_api
+          push: true
+          tags: ${{ steps.vars.outputs.API_IMAGE }}
+          cache-from: type=registry,ref=${{ steps.vars.outputs.API_IMAGE }}
           cache-to: type=inline
 
       - name: Prepare EC2 folder
@@ -165,6 +176,12 @@ jobs:
             --protocol tcp \
             --port 8000 \
             --cidr 0.0.0.0/0 || true
+          echo "Adding inbound rule for port 8001 to default security group..."
+          AWS_PAGER="" aws ec2 authorize-security-group-ingress \
+            --group-name default \
+            --protocol tcp \
+            --port 8001 \
+            --cidr 0.0.0.0/0 || true
 
       - name: Verify deployment
         run: |
@@ -188,8 +205,10 @@ jobs:
           echo "Testing health endpoint locally..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "curl -v http://localhost:8000/health"
+            "curl -v http://localhost:8000/health && \
+             curl -v http://localhost:8001/health"
 
           echo "Testing health endpoint from public IP..."
-          curl -v "http://${{ secrets.EC2_HOST }}:8000/health"
+          curl -v "http://${{ secrets.EC2_HOST }}:8000/health" && \
+          curl -v "http://${{ secrets.EC2_HOST }}:8001/health"
         continue-on-error: false
