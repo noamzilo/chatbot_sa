@@ -77,6 +77,12 @@ def get_similar_documents(query: str, limit: int) -> List[DocumentResponse]:
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 logger.info("Executing similarity search query...")
+                # First check total documents with embeddings
+                cur.execute("SELECT COUNT(*) as count FROM gringo.documents WHERE embedding IS NOT NULL")
+                total_docs = cur.fetchone()['count']
+                logger.info(f"Total documents with embeddings: {total_docs}")
+                
+                # Now execute the similarity search
                 cur.execute("""
                     SELECT 
                         id, url, title, content,
@@ -89,10 +95,28 @@ def get_similar_documents(query: str, limit: int) -> List[DocumentResponse]:
                 
                 results = cur.fetchall()
                 logger.info(f"Found {len(results)} matching documents")
-                if results:
-                    logger.info(f"Similarity scores: {[r['similarity'] for r in results]}")
                 
-        return [DocumentResponse(**doc) for doc in results]
+                # Process and truncate documents to stay within token limits
+                processed_results = []
+                total_tokens = 0
+                max_tokens_per_doc = 2000  # Limit tokens per document
+                
+                for doc in results:
+                    # Truncate content if too long
+                    content = doc['content']
+                    if len(content.split()) > max_tokens_per_doc:
+                        content = ' '.join(content.split()[:max_tokens_per_doc]) + "..."
+                    
+                    processed_doc = {
+                        'id': doc['id'],
+                        'url': doc['url'],
+                        'title': doc['title'],
+                        'content': content,
+                        'similarity': doc['similarity']
+                    }
+                    processed_results.append(processed_doc)
+                
+                return [DocumentResponse(**doc) for doc in processed_results]
     except Exception as e:
         logger.error(f"Error querying documents: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -123,14 +147,28 @@ async def query_documents(request: QueryRequest):
                 sources=[]
             )
 
-        # Format documents for context
-        context = "\n\n".join([
-            f"Source {i+1} (URL: {doc.url}):\n{doc.content}"
-            for i, doc in enumerate(documents)
-        ])
-        logger.info(f"Formatted context with {len(documents)} sources")
+        # Format documents for context, ensuring we stay within token limits
+        context_parts = []
+        total_tokens = 0
+        max_context_tokens = 8000  # Conservative limit for context
+        
+        for doc in documents:
+            doc_tokens = len(doc.content.split())
+            if total_tokens + doc_tokens > max_context_tokens:
+                # Truncate the document if adding it would exceed the limit
+                remaining_tokens = max_context_tokens - total_tokens
+                if remaining_tokens > 0:
+                    truncated_content = ' '.join(doc.content.split()[:remaining_tokens]) + "..."
+                    context_parts.append(f"Source {len(context_parts)+1} (URL: {doc.url}):\n{truncated_content}")
+                break
+            else:
+                context_parts.append(f"Source {len(context_parts)+1} (URL: {doc.url}):\n{doc.content}")
+                total_tokens += doc_tokens
 
-        # Create RAG prompt
+        context = "\n\n".join(context_parts)
+        logger.info(f"Formatted context with {len(context_parts)} sources, total tokens: {total_tokens}")
+
+        # Create RAG prompt with explicit language handling
         prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a helpful assistant that answers questions based on the provided context.
             Generate a clear, concise answer in your own words based on the context.
@@ -143,7 +181,6 @@ async def query_documents(request: QueryRequest):
 
             Question (in {question_language}): {question}""")
         ])
-        logger.info("Created RAG prompt template")
 
         # Create RAG chain
         chain = (
@@ -157,12 +194,21 @@ async def query_documents(request: QueryRequest):
             | llm
             | StrOutputParser()
         )
-        logger.info("Created RAG chain")
 
         # Generate answer
         logger.info("Generating answer using RAG chain...")
-        answer = chain.invoke(request.query)
-        logger.info(f"Generated answer: {answer}")
+        try:
+            answer = chain.invoke(request.query)
+            logger.info(f"Generated answer: {answer}")
+        except Exception as e:
+            if "context_length_exceeded" in str(e):
+                logger.error("Token limit exceeded, retrying with reduced context")
+                # If we hit the token limit, try with fewer documents
+                if len(documents) > 1:
+                    return await query_documents(QueryRequest(query=request.query, limit=len(documents)-1))
+                else:
+                    raise HTTPException(status_code=400, detail="The query is too long to process. Please try a shorter query.")
+            raise
         
         return RAGResponse(
             answer=answer,
