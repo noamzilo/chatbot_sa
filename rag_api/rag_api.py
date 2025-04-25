@@ -3,7 +3,6 @@ import logging
 from typing import List, Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import numpy as np
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from openai import OpenAI
