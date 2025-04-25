@@ -53,30 +53,41 @@ async def health_check():
 @app.post("/query", response_model=List[DocumentResponse])
 async def query_documents(request: QueryRequest):
     try:
+        logger.info(f"Received query request: {request.query} with limit {request.limit}")
+        
         # Get embedding for the query
+        logger.info("Generating embedding for query...")
         response = client.embeddings.create(
             input=request.query,
             model="text-embedding-3-small"
         )
         query_embedding = response.data[0].embedding
+        logger.info(f"Generated embedding of length: {len(query_embedding)}")
+
+        # Convert embedding to string format for pgvector
+        embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
+        logger.info("Converted embedding to string format")
 
         # Query the database
+        logger.info("Querying database for similar documents...")
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                logger.info("Executing similarity search query...")
                 cur.execute("""
                     SELECT 
                         id, url, title, content,
-                        1 - (embedding <=> %s) as similarity
+                        1 - (embedding <=> %s::vector) as similarity
                     FROM gringo.documents
-                    ORDER BY embedding <=> %s
+                    ORDER BY embedding <=> %s::vector
                     LIMIT %s
-                """, (query_embedding, query_embedding, request.limit))
+                """, (embedding_str, embedding_str, request.limit))
                 
                 results = cur.fetchall()
+                logger.info(f"Found {len(results)} matching documents")
                 
         return [DocumentResponse(**doc) for doc in results]
     except Exception as e:
-        logger.error(f"Error querying documents: {e}")
+        logger.error(f"Error querying documents: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/documents/{document_id}", response_model=DocumentResponse)
