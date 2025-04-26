@@ -1,0 +1,125 @@
+name: Deploy Crawler Services
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crawlers/**'
+      - '.github/workflows/deploy-crawlers.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-20.04
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Check required environment variables
+        run: |
+          for var in ECR_REGISTRY ECR_REPOSITORY POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION EC2_SSH_KEY_B64 EC2_USER EC2_HOST; do
+            if [ -z "${!var}" ]; then
+              echo "Error: Required environment variable $var is not set"
+              exit 1
+            fi
+          done
+
+      - name: Decode EC2 SSH key
+        run: |
+          echo "${{ secrets.EC2_SSH_KEY_B64 }}" | base64 -d > /tmp/chatbot_sa_key.pem
+          chmod 600 /tmp/chatbot_sa_key.pem
+
+      - uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ secrets.AWS_REGION }}
+
+      - name: Install AWS CLI
+        run: |
+          curl -sSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
+          unzip -q awscliv2.zip
+          sudo ./aws/install --update
+
+      - name: Ensure ECR repositories exist
+        env: { AWS_PAGER: "" }
+        run: |
+          for repo in crawler parser; do
+            full="${{ secrets.ECR_REPOSITORY }}_${repo}"
+            aws ecr describe-repositories --repository-names "$full" --region ${{ secrets.AWS_REGION }} \
+              || aws ecr create-repository --repository-name "$full" --region ${{ secrets.AWS_REGION }}
+          done
+
+      - name: Log in to Amazon ECR
+        run: |
+          aws ecr get-login-password | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
+
+      - name: Download sitemap for build
+        run: |
+          mkdir -p ./crawlers/gringo_fetcher
+          curl -L -A "Mozilla/5.0" -o ./crawlers/gringo_fetcher/sitemap.xml \
+            https://gringo.co.il/sitemap.xml || true
+
+      - name: Build and push crawler image
+        uses: docker/build-push-action@v3
+        with:
+          context: ./crawlers/gringo_fetcher
+          push: true
+          tags: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_crawler:latest
+          build-args: SITEMAP_XML=sitemap.xml
+
+      - name: Build and push parser image
+        uses: docker/build-push-action@v3
+        with:
+          context: ./crawlers/gringo_parser
+          push: true
+          tags: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_parser:latest
+
+      - name: Prepare EC2 folder
+        run: |
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "sudo mkdir -p /home/${{ secrets.EC2_USER }}/chatbot_sa && \
+             sudo chown -R ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /home/${{ secrets.EC2_USER }}/chatbot_sa"
+
+      - name: Upload docker-compose.yml
+        run: |
+          scp -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            docker-compose.yml \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/chatbot_sa/docker-compose.yml
+
+      - name: Upload .env
+        run: |
+          cat > /tmp/remote.env << EOF
+          ECR_REGISTRY=${{ secrets.ECR_REGISTRY }}
+          ECR_REPOSITORY=${{ secrets.ECR_REPOSITORY }}
+          POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          EOF
+          scp -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            /tmp/remote.env \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/chatbot_sa/.env
+
+      - name: Ensure Docker Compose on EC2
+        run: |
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            'if ! command -v docker-compose >/dev/null || [ "$(docker-compose version --short)" != "2.20.2" ]; then
+               sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64" \
+                 -o /usr/local/bin/docker-compose && sudo chmod +x /usr/local/bin/docker-compose;
+             fi'
+
+      - name: Deploy crawler services
+        run: |
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "cd /home/${{ secrets.EC2_USER }}/chatbot_sa && \
+             aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }} && \
+             docker-compose pull gringo_fetcher gringo_parser && \
+             docker-compose up -d gringo_fetcher gringo_parser"
+
+      - name: Verify deployment
+        run: |
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "docker ps | grep -E 'fetcher|parser'" 
