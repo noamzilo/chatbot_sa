@@ -2,8 +2,7 @@ name: Deploy to EC2 via ECR
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -11,8 +10,8 @@ jobs:
     runs-on: ubuntu-20.04
 
     steps:
-      - name: Check out code
-        uses: actions/checkout@v3
+      # 1  Checkout & SSH key
+      - uses: actions/checkout@v3
 
       - name: Decode EC2 SSH key
         run: |
@@ -25,82 +24,75 @@ jobs:
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
             "echo 'SSH connection successful'"
 
+      # 2  Optional debug – sitemap from EC2
       - name: Test downloading Gringo sitemap from EC2
         run: |
-          echo "Trying to download https://gringo.co.il/sitemap.xml from EC2..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "curl -v -L -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36' https://gringo.co.il/sitemap.xml"
+            "curl -s -o /dev/null -w 'HTTP=%{http_code}\n' -A 'Mozilla/5.0' https://gringo.co.il/sitemap.xml || true"
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+      # 3  AWS credentials (env-vars only)
+      - uses: aws-actions/configure-aws-credentials@v2
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region:            ${{ secrets.AWS_REGION }}
 
-      - name: Set image tags
-        id: vars
-        run: |
-          echo "BOT_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_bot:latest" >> "$GITHUB_OUTPUT"
-          echo "CRAWLER_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_crawler:latest" >> "$GITHUB_OUTPUT"
-          echo "PARSER_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_parser:latest" >> "$GITHUB_OUTPUT"
-          echo "API_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_api:latest" >> "$GITHUB_OUTPUT"
-
-      - name: Install or Update AWS CLI (for act compatibility)
+      # 4  *** Install AWS CLI (needed for act) ***
+      - name: Install AWS CLI
         run: |
           curl -sSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
           unzip -q awscliv2.zip
           sudo ./aws/install --update
           aws --version
 
-      - name: Create ECR repositories if they don't exist
+      # 5  Image tag outputs
+      - id: vars
         run: |
-          export AWS_PAGER=""
-          REPOSITORIES=("${{ secrets.ECR_REPOSITORY }}_bot" "${{ secrets.ECR_REPOSITORY }}_crawler" "${{ secrets.ECR_REPOSITORY }}_parser" "${{ secrets.ECR_REPOSITORY }}_api")
-          for REPO in "${REPOSITORIES[@]}"; do
-            echo "Checking if repository $REPO exists..."
-            if ! aws ecr describe-repositories --repository-names "$REPO" --region ${{ secrets.AWS_REGION }}; then
-              echo "Repository $REPO does not exist. Creating..."
-              aws ecr create-repository --repository-name "$REPO" --region ${{ secrets.AWS_REGION }}
-            else
-              echo "Repository $REPO already exists."
-            fi
+          echo "BOT_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_bot:latest"         >> $GITHUB_OUTPUT
+          echo "CRAWLER_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_crawler:latest" >> $GITHUB_OUTPUT
+          echo "PARSER_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_parser:latest"   >> $GITHUB_OUTPUT
+          echo "API_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_api:latest"         >> $GITHUB_OUTPUT
+
+      # 6  Ensure ECR repositories exist
+      - name: Ensure ECR repositories exist
+        env: { AWS_PAGER: "" }
+        run: |
+          for repo in bot crawler parser api; do
+            full="${{ secrets.ECR_REPOSITORY }}_${repo}"
+            aws ecr describe-repositories --repository-names "$full" --region ${{ secrets.AWS_REGION }} \
+              || aws ecr create-repository --repository-name "$full" --region ${{ secrets.AWS_REGION }}
           done
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
 
       - name: Log in to Amazon ECR
         run: |
           aws ecr get-login-password | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
 
-      - name: Pull existing images for build cache
-        continue-on-error: true
+      # 7  Download sitemap into build context
+      - name: Download sitemap for build
         run: |
-          docker pull ${{ steps.vars.outputs.BOT_IMAGE }}
-          docker pull ${{ steps.vars.outputs.CRAWLER_IMAGE }}
-          docker pull ${{ steps.vars.outputs.PARSER_IMAGE }}
-          docker pull ${{ steps.vars.outputs.API_IMAGE }}
+          mkdir -p ./crawlers/gringo_fetcher
+          curl -L -A "Mozilla/5.0" -o ./crawlers/gringo_fetcher/sitemap.xml \
+            https://gringo.co.il/sitemap.xml || true
 
-      - name: Build and push bot image
-        uses: docker/build-push-action@v3
-        with:
-          context: ./bot
-          push: true
-          tags: ${{ steps.vars.outputs.BOT_IMAGE }}
-          cache-from: type=registry,ref=${{ steps.vars.outputs.BOT_IMAGE }}
-          cache-to: type=inline
-
+      # 8  Build & push crawler image
       - name: Build and push crawler image
         uses: docker/build-push-action@v3
         with:
           context: ./crawlers/gringo_fetcher
           push: true
           tags: ${{ steps.vars.outputs.CRAWLER_IMAGE }}
+          build-args: SITEMAP_XML=sitemap.xml
           cache-from: type=registry,ref=${{ steps.vars.outputs.CRAWLER_IMAGE }}
           cache-to: type=inline
+
+      # 9  Build & push other images
+      - name: Build and push bot image
+        uses: docker/build-push-action@v3
+        with:
+          context: ./bot
+          push: true
+          tags: ${{ steps.vars.outputs.BOT_IMAGE }}
 
       - name: Build and push parser image
         uses: docker/build-push-action@v3
@@ -108,8 +100,6 @@ jobs:
           context: ./crawlers/gringo_parser
           push: true
           tags: ${{ steps.vars.outputs.PARSER_IMAGE }}
-          cache-from: type=registry,ref=${{ steps.vars.outputs.PARSER_IMAGE }}
-          cache-to: type=inline
 
       - name: Build and push API image
         uses: docker/build-push-action@v3
@@ -117,14 +107,21 @@ jobs:
           context: ./rag_api
           push: true
           tags: ${{ steps.vars.outputs.API_IMAGE }}
-          cache-from: type=registry,ref=${{ steps.vars.outputs.API_IMAGE }}
-          cache-to: type=inline
 
+      # 10  Free disk on EC2
+      - name: Prune Docker on EC2
+        run: |
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "docker system prune -af && docker volume prune -f && docker builder prune -af"
+
+      # 11  Upload compose & env
       - name: Prepare EC2 folder
         run: |
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "sudo chown -R ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /home/${{ secrets.EC2_USER }}/chatbot_sa"
+            "sudo mkdir -p /home/${{ secrets.EC2_USER }}/chatbot_sa && \
+             sudo chown -R ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /home/${{ secrets.EC2_USER }}/chatbot_sa"
 
       - name: Upload docker-compose.yml
         run: |
@@ -132,101 +129,41 @@ jobs:
             docker-compose.yml \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/chatbot_sa/docker-compose.yml
 
-      - name: Create and upload .env file
+      - name: Upload .env
         run: |
-          mkdir -p /tmp/
-          echo "EC2_HOST=${{ secrets.EC2_HOST }}" > /tmp/.env
-          echo "EC2_USER=${{ secrets.EC2_USER }}" >> /tmp/.env
-          echo "EC2_SSH_KEY_B64=${{ secrets.EC2_SSH_KEY_B64 }}" >> /tmp/.env
-          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" >> /tmp/.env
-          echo "TELEGRAM_WEBHOOK_MODE=${{ secrets.TELEGRAM_WEBHOOK_MODE }}" >> /tmp/.env
-          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> /tmp/.env
-          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> /tmp/.env
-          echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> /tmp/.env
-          echo "ECR_REGISTRY=${{ secrets.ECR_REGISTRY }}" >> /tmp/.env
-          echo "ECR_REPOSITORY=${{ secrets.ECR_REPOSITORY }}" >> /tmp/.env
-          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> /tmp/.env
-          echo "POSTGRES_USER=postgres" >> /tmp/.env
-          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> /tmp/.env
-          echo "POSTGRES_DB=chatbot_sa" >> /tmp/.env
-          echo "POSTGRES_HOST=db" >> /tmp/.env
-          echo "POSTGRES_PORT=5432" >> /tmp/.env
-          echo "REDIS_HOST=redis" >> /tmp/.env
-          echo "REDIS_PORT=6379" >> /tmp/.env
-
+          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" > /tmp/remote.env
           scp -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
-            /tmp/.env \
+            /tmp/remote.env \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/chatbot_sa/.env
 
+      # 12  Ensure Docker Compose on EC2
       - name: Ensure Docker Compose >= v2.20.2 on EC2
         run: |
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            'if ! command -v docker-compose >/dev/null; then
-               echo "Docker Compose not found, installing..."; INSTALL=1;
-             elif [ "$(docker-compose version --short)" != "2.20.2" ]; then
-               echo "Docker Compose version is outdated, updating..."; INSTALL=1;
-             else
-               echo "Docker Compose is up to date."; INSTALL=0;
-             fi;
-             if [ "$INSTALL" = "1" ]; then
+            'if ! command -v docker-compose >/dev/null || [ "$(docker-compose version --short)" != "2.20.2" ]; then
                sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64" \
-                 -o /usr/local/bin/docker-compose && \
-               sudo chmod +x /usr/local/bin/docker-compose && \
-               docker-compose version;
+                 -o /usr/local/bin/docker-compose && sudo chmod +x /usr/local/bin/docker-compose;
              fi'
 
-      - name: Deploy on EC2
+      # 13  Compose up
+      - name: Docker Compose up
         run: |
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
             "cd /home/${{ secrets.EC2_USER }}/chatbot_sa && \
-             aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
-               | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }} && \
-             docker-compose up -d"
+             aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }} && \
+             docker-compose pull && docker-compose up -d"
 
+      # 14  Open ports (non-fatal)
       - name: Configure EC2 Security Group
         run: |
-          echo "Adding inbound rule for port 8000 to default security group..."
-          AWS_PAGER="" aws ec2 authorize-security-group-ingress \
-            --group-name default \
-            --protocol tcp \
-            --port 8000 \
-            --cidr 0.0.0.0/0 || true
-          echo "Adding inbound rule for port 8001 to default security group..."
-          AWS_PAGER="" aws ec2 authorize-security-group-ingress \
-            --group-name default \
-            --protocol tcp \
-            --port 8001 \
-            --cidr 0.0.0.0/0 || true
+          AWS_PAGER="" aws ec2 authorize-security-group-ingress --group-name default --protocol tcp --port 8000 --cidr 0.0.0.0/0 || true
+          AWS_PAGER="" aws ec2 authorize-security-group-ingress --group-name default --protocol tcp --port 8001 --cidr 0.0.0.0/0 || true
 
+      # 15  Verify deployment
       - name: Verify deployment
         run: |
-          echo "Checking container status..."
-          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "docker ps"
-
-          echo "Waiting for containers to start..."
-          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "sleep 10"
-
-          echo "Checking container logs..."
-          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "docker logs chatbot_sa_bot"
-          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "docker logs gringo_fetcher"
-          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "docker logs gringo_parser"
-
-          echo "Testing health endpoint for BOT locally..."
-          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "curl -f http://localhost:8000/health"
-
-          echo "Testing health endpoint for BOT from public IP..."
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "docker ps"
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "curl -f http://localhost:8000/health"
           curl -f "http://${{ secrets.EC2_HOST }}:8000/health"

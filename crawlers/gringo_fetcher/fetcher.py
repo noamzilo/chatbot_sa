@@ -1,162 +1,148 @@
 #!/usr/bin/env python3
-import os
-import time
-import logging
-import requests
-import psycopg2
-import redis
-from dotenv import load_dotenv
-from xml.etree import ElementTree as ET
-from langchain_community.document_loaders import SitemapLoader
-from bs4 import BeautifulSoup
-import json
+"""
+Gringo Fetcher – step 1
+Download first N URLs from Gringo sitemap and publish rows to gringo.raw_pages.
+Publishes “gringo:fetcher:done” on Redis when finished.
+"""
+
+import os, time, logging, requests, psycopg2, redis, json, warnings
+from dotenv           import load_dotenv
+from xml.etree         import ElementTree as ET
+from bs4               import BeautifulSoup            # only for safe_parsing
+from pathlib           import Path
 
 # ───────────────────────── CONFIG ─────────────────────────
-SITEMAP_URL = "https://gringo.co.il/sitemap.xml"
-SITEMAP_TTL = 7 * 24 * 3600
-MAX_PAGES = 10
-HEADERS = {
-	"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
-}
+SITEMAP_URL  = "https://gringo.co.il/sitemap.xml"
+SITEMAP_TTL  = 7 * 24 * 3600
+MAX_PAGES    = 10
+
+UA = os.getenv("USER_AGENT") or \
+     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+HEADERS = {"User-Agent": UA}
 # ──────────────────────────────────────────────────────────
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / ".env")
 
 logging.basicConfig(
-	level=logging.DEBUG,
-	format="%(asctime)s [FETCHER] %(levelname)s ▶ %(message)s",
-	datefmt="%Y-%m-%d %H:%M:%S",
+    level   = logging.DEBUG,
+    format  = "%(asctime)s [FETCHER] %(levelname)s ▶ %(message)s",
+    datefmt = "%Y-%m-%d %H:%M:%S",
 )
 
+# ───────────────────────── helpers ────────────────────────
 def get_redis():
-	return redis.Redis(
-		host=os.getenv("REDIS_HOST", "localhost"),
-		port=int(os.getenv("REDIS_PORT", 6379)),
-		db=0,
-		decode_responses=True
-	)
+    return redis.Redis(
+        host = os.getenv("REDIS_HOST", "localhost"),
+        port = int(os.getenv("REDIS_PORT", 6379)),
+        db   = 0,
+        decode_responses = True,
+    )
 
-def get_db(retries=10, delay=2):
-	for i in range(retries):
-		try:
-			conn = psycopg2.connect(
-				dbname=os.getenv("POSTGRES_DB"),
-				user=os.getenv("POSTGRES_USER"),
-				password=os.getenv("POSTGRES_PASSWORD"),
-				host=os.getenv("POSTGRES_HOST"),
-				port=os.getenv("POSTGRES_PORT"),
-			)
-			return conn
-		except psycopg2.OperationalError as e:
-			logging.warning(f"DB not ready, retrying in {delay}s… ({e})")
-			if i < retries - 1:
-				time.sleep(delay)
-			else:
-				raise
+def get_db(retries: int = 10, delay: int = 2):
+    for i in range(retries):
+        try:
+            return psycopg2.connect(
+                dbname   = os.getenv("POSTGRES_DB"),
+                user     = os.getenv("POSTGRES_USER"),
+                password = os.getenv("POSTGRES_PASSWORD"),
+                host     = os.getenv("POSTGRES_HOST"),
+                port     = os.getenv("POSTGRES_PORT"),
+            )
+        except psycopg2.OperationalError as e:
+            logging.warning(f"DB not ready, retrying in {delay}s… ({e})")
+            if i < retries - 1:
+                time.sleep(delay)
+            else:
+                raise
 
-def get_first_n_urls_from_sitemap(url: str, n: int) -> list[str]:
-	logging.info(f"Downloading sitemap: {url}")
-	resp = requests.get(url, timeout=15, headers=HEADERS)
-	resp.raise_for_status()
-	root = ET.fromstring(resp.content)
-	ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
-	url_tags = root.findall("sm:url", ns)
-	locs = []
-	for tag in url_tags:
-		loc = tag.find("sm:loc", ns)
-		if loc is not None and loc.text:
-			locs.append(loc.text.strip())
-		if len(locs) >= n:
-			break
-	logging.info(f"Loaded {len(locs)} URLs from sitemap")
-	return locs
+def download_sitemap() -> bytes:
+    """Try live sitemap first, fallback to baked file inside image."""
+    try:
+        resp = requests.get(SITEMAP_URL, headers=HEADERS, timeout=15)
+        resp.raise_for_status()
+        return resp.content
+    except Exception as e:
+        cached = os.getenv("SITEMAP_CACHED", "")
+        if cached and Path(cached).exists():
+            warnings.warn(f"Remote sitemap failed ({e}); using cached copy")
+            return Path(cached).read_bytes()
+        raise
 
-def safe_parsing(bs):
-	if bs is None:
-		return ""
-	try:
-		# Extract h1 title
-		h1 = bs.find('h1')
-		title = " ".join(h1.stripped_strings) if h1 else ""
-		
-		# Extract main content from section.text-body
-		content_section = bs.find('section', class_='text-body')
-		content = " ".join(content_section.stripped_strings) if content_section else ""
-		
-		# Create JSON structure
-		result = json.dumps({
-			"title": title,
-			"content": content
-		}, ensure_ascii=False)
-		
-		return result
-	except Exception as e:
-		logging.warning(f"[PARSE FAIL] Could not extract text: {e}")
-		return ""
+def get_first_n_urls(n: int) -> list[str]:
+    logging.info(f"Downloading sitemap: {SITEMAP_URL}")
+    raw_xml = download_sitemap()
+    root = ET.fromstring(raw_xml)
+    ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+    locs = [
+        loc.text.strip()
+        for loc in (tag.find("sm:loc", ns) for tag in root.findall("sm:url", ns))
+        if loc is not None and loc.text
+    ]
+    logging.info(f"Loaded {len(locs)} URLs from sitemap")
+    return locs[:n]
 
+# ↓ unchanged helper
+def safe_parsing(bs: BeautifulSoup) -> str:
+    if bs is None:
+        return ""
+    try:
+        h1      = bs.find('h1')
+        title   = " ".join(h1.stripped_strings) if h1 else ""
+        section = bs.find('section', class_='text-body')
+        content = " ".join(section.stripped_strings) if section else ""
+        return json.dumps({"title": title, "content": content}, ensure_ascii=False)
+    except Exception as e:
+        logging.warning(f"[PARSE FAIL] {e}")
+        return ""
+
+# ───────────────────────── main crawl ─────────────────────
 def crawl_once():
-	logging.info(f"Loading first {MAX_PAGES} pages via blocksize…")
-	loader = SitemapLoader(
-		web_path=SITEMAP_URL,
-		blocksize=MAX_PAGES,
-		blocknum=0,
-		restrict_to_same_domain=False,
-		parsing_function=safe_parsing
-	)
+    logging.info(f"Loading first {MAX_PAGES} pages via custom list…")
+    urls = get_first_n_urls(MAX_PAGES)
 
-	docs = loader.load()
-	logging.info(f"SitemapLoader returned {len(docs)} docs")
+    db  = get_db(); db.autocommit = True
+    cur = db.cursor()
 
-	db = get_db()
-	db.autocommit = True
-	cur = db.cursor()
+    for url in urls:
+        try:
+            html = safe_parsing(BeautifulSoup(requests.get(url, headers=HEADERS, timeout=15).text, "html.parser"))
+        except Exception as e:
+            logging.error(f"[FETCH FAIL] {url} → {e}")
+            continue
 
-	for i, doc in enumerate(docs):
-		url = doc.metadata.get("source") or doc.metadata.get("loc") or ""
-		html = doc.page_content
+        if not html.strip():
+            logging.warning(f"[SKIP] {url} → empty content")
+            continue
 
-		if not url:
-			logging.warning("[SKIP] No URL in doc")
-			continue
+        preview = html[:100].replace("\n", " ")
+        logging.info(f"[INSERT] {url} ({len(html)} chars)")
+        logging.debug(f"[CONTENT PREVIEW] {preview}…")
+        try:
+            cur.execute(
+                """
+                INSERT INTO gringo.raw_pages(url, relevant_content)
+                VALUES (%s,%s)
+                ON CONFLICT(url) DO UPDATE
+                SET relevant_content = excluded.relevant_content,
+                    fetched_at      = current_timestamp
+                """,
+                (url, html),
+            )
+        except Exception as e:
+            logging.error(f"[DB FAIL] {url} → {e}")
 
-		if not html.strip():
-			logging.warning(f"[SKIP] {url} → empty content")
-			continue
+    cur.close(); db.close()
+    logging.info("Fetch pass complete ✔")
 
-		# Log a preview of the processed content
-		preview = html[:100].replace('\n', ' ').strip()
-		logging.info(f"[INSERT] {url} → {len(html)} chars")
-		logging.debug(f"[CONTENT PREVIEW] {url} → {preview}...")
-
-		try:
-			cur.execute(
-				"""
-				INSERT INTO gringo.raw_pages(url, relevant_content)
-				VALUES (%s, %s)
-				ON CONFLICT(url) DO UPDATE
-				SET relevant_content = excluded.relevant_content,
-					fetched_at = current_timestamp
-				""",
-				(url, html),
-			)
-		except Exception as e:
-			logging.error(f"[FAIL] DB error for {url} → {e}")
-			logging.error(f"Content type: {type(html)}, Length: {len(html)}")
-
-	cur.close()
-	db.close()
-	logging.info("Fetch pass complete ✔")
-
+# ───────────────────────── entrypoint loop ────────────────
 if __name__ == "__main__":
-	while True:
-		try:
-			crawl_once()
-			# Signal parser that we're done
-			r = get_redis()
-			r.publish('gringo:fetcher:done', '1')
-			logging.info("Sent completion signal to parser")
-			# Sleep for 1 week before next run
-			time.sleep(604800)
-		except Exception as e:
-			logging.error(f"Error in fetcher main loop: {e}")
-			time.sleep(60)  # Sleep for 1 minute on error before retrying
+    while True:
+        try:
+            crawl_once()
+            get_redis().publish('gringo:fetcher:done', '1')
+            logging.info("Sent completion signal to parser")
+            time.sleep(SITEMAP_TTL)
+        except Exception as e:
+            logging.error(f"Error in fetcher main loop: {e}")
+            time.sleep(60)
