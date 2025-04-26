@@ -15,7 +15,9 @@ import json
 SITEMAP_URL = "https://gringo.co.il/sitemap.xml"
 SITEMAP_TTL = 7 * 24 * 3600
 MAX_PAGES = 10
-HEADERS = {"User-Agent": "Mozilla/5.0 (GringoFetcher/1.0)"}
+HEADERS = {
+	"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+}
 # ──────────────────────────────────────────────────────────
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
