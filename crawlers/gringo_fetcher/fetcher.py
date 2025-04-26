@@ -2,7 +2,7 @@
 """
 Gringo Fetcher – step 1
 Download first N URLs from Gringo sitemap and publish rows to gringo.raw_pages.
-Publishes “gringo:fetcher:done” on Redis when finished.
+Publishes "gringo:fetcher:done" on Redis when finished.
 """
 
 import os, time, logging, requests, psycopg2, redis, json, warnings
@@ -21,7 +21,7 @@ UA = os.getenv("USER_AGENT") or \
 HEADERS = {"User-Agent": UA}
 # ──────────────────────────────────────────────────────────
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parent
 load_dotenv(PROJECT_ROOT / ".env")
 
 logging.basicConfig(
