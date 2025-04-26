@@ -35,7 +35,7 @@ jobs:
       - name: Set image tags
         id: vars
         run: |
-          echo "BOT_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest" >> "$GITHUB_OUTPUT"
+          echo "BOT_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_bot:latest" >> "$GITHUB_OUTPUT"
           echo "CRAWLER_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_crawler:latest" >> "$GITHUB_OUTPUT"
           echo "PARSER_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_parser:latest" >> "$GITHUB_OUTPUT"
           echo "API_IMAGE=${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}_api:latest" >> "$GITHUB_OUTPUT"
@@ -46,6 +46,13 @@ jobs:
           unzip -q awscliv2.zip
           sudo ./aws/install --update
           aws --version
+
+      - name: Create ECR repositories if they don't exist
+        run: |
+          aws ecr describe-repositories --repository-names ${{ secrets.ECR_REPOSITORY }}_bot || aws ecr create-repository --repository-name ${{ secrets.ECR_REPOSITORY }}_bot
+          aws ecr describe-repositories --repository-names ${{ secrets.ECR_REPOSITORY }}_crawler || aws ecr create-repository --repository-name ${{ secrets.ECR_REPOSITORY }}_crawler
+          aws ecr describe-repositories --repository-names ${{ secrets.ECR_REPOSITORY }}_parser || aws ecr create-repository --repository-name ${{ secrets.ECR_REPOSITORY }}_parser
+          aws ecr describe-repositories --repository-names ${{ secrets.ECR_REPOSITORY }}_api || aws ecr create-repository --repository-name ${{ secrets.ECR_REPOSITORY }}_api
 
       - name: Log in to Amazon ECR
         run: |
