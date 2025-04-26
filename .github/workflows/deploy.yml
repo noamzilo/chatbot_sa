@@ -180,11 +180,6 @@ jobs:
 
       - name: Configure EC2 Security Group
         run: |
-          echo "Verifying EC2_HOST is set..."
-          if [ -z "${{ secrets.EC2_HOST }}" ]; then
-            echo "Error: EC2_HOST is not set"
-            exit 1
-          fi
           echo "Adding inbound rule for port 8000 to default security group..."
           AWS_PAGER="" aws ec2 authorize-security-group-ingress \
             --group-name default \
@@ -213,16 +208,18 @@ jobs:
           echo "Checking container logs..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "docker logs chatbot_sa_bot || true && \
-             docker logs gringo_fetcher || true && \
-             docker logs gringo_parser || true"
-
-          echo "Testing health endpoint locally..."
+            "docker logs chatbot_sa_bot"
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "curl -v http://localhost:8000/health || true && \
-             curl -v http://localhost:8001/health || true"
+            "docker logs gringo_fetcher"
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "docker logs gringo_parser"
 
-          echo "Testing health endpoint from public IP..."
-          curl -v "http://${{ secrets.EC2_HOST }}:8000/health" || true
-          curl -v "http://${{ secrets.EC2_HOST }}:8001/health" || true
+          echo "Testing health endpoint for BOT locally..."
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "curl -f http://localhost:8000/health"
+
+          echo "Testing health endpoint for BOT from public IP..."
+          curl -f "http://${{ secrets.EC2_HOST }}:8000/health"
