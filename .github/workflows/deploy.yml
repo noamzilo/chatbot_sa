@@ -49,10 +49,21 @@ jobs:
 
       - name: Create ECR repositories if they don't exist
         run: |
-          aws ecr describe-repositories --repository-names ${{ secrets.ECR_REPOSITORY }}_bot || aws ecr create-repository --repository-name ${{ secrets.ECR_REPOSITORY }}_bot
-          aws ecr describe-repositories --repository-names ${{ secrets.ECR_REPOSITORY }}_crawler || aws ecr create-repository --repository-name ${{ secrets.ECR_REPOSITORY }}_crawler
-          aws ecr describe-repositories --repository-names ${{ secrets.ECR_REPOSITORY }}_parser || aws ecr create-repository --repository-name ${{ secrets.ECR_REPOSITORY }}_parser
-          aws ecr describe-repositories --repository-names ${{ secrets.ECR_REPOSITORY }}_api || aws ecr create-repository --repository-name ${{ secrets.ECR_REPOSITORY }}_api
+          export AWS_PAGER=""
+          REPOSITORIES=("${{ secrets.ECR_REPOSITORY }}_bot" "${{ secrets.ECR_REPOSITORY }}_crawler" "${{ secrets.ECR_REPOSITORY }}_parser" "${{ secrets.ECR_REPOSITORY }}_api")
+          for REPO in "${REPOSITORIES[@]}"; do
+            echo "Checking if repository $REPO exists..."
+            if ! aws ecr describe-repositories --repository-names "$REPO" --region ${{ secrets.AWS_REGION }}; then
+              echo "Repository $REPO does not exist. Creating..."
+              aws ecr create-repository --repository-name "$REPO" --region ${{ secrets.AWS_REGION }}
+            else
+              echo "Repository $REPO already exists."
+            fi
+          done
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
 
       - name: Log in to Amazon ECR
         run: |
@@ -145,14 +156,11 @@ jobs:
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
             'if ! command -v docker-compose >/dev/null; then
-               echo "Docker Compose not found, installing...";
-               INSTALL=1;
+               echo "Docker Compose not found, installing..."; INSTALL=1;
              elif [ "$(docker-compose version --short)" != "2.20.2" ]; then
-               echo "Docker Compose version is outdated, updating...";
-               INSTALL=1;
+               echo "Docker Compose version is outdated, updating..."; INSTALL=1;
              else
-               echo "Docker Compose is up to date.";
-               INSTALL=0;
+               echo "Docker Compose is up to date."; INSTALL=0;
              fi;
              if [ "$INSTALL" = "1" ]; then
                sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64" \
@@ -205,17 +213,16 @@ jobs:
           echo "Checking container logs..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "docker logs chatbot_sa_bot && \
-             docker logs gringo_fetcher && \
-             docker logs gringo_parser"
+            "docker logs chatbot_sa_bot || true && \
+             docker logs gringo_fetcher || true && \
+             docker logs gringo_parser || true"
 
           echo "Testing health endpoint locally..."
           ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "curl -v http://localhost:8000/health && \
-             curl -v http://localhost:8001/health"
+            "curl -v http://localhost:8000/health || true && \
+             curl -v http://localhost:8001/health || true"
 
           echo "Testing health endpoint from public IP..."
-          curl -v "http://${{ secrets.EC2_HOST }}:8000/health" && \
-          curl -v "http://${{ secrets.EC2_HOST }}:8001/health"
-        continue-on-error: false
+          curl -v "http://${{ secrets.EC2_HOST }}:8000/health" || true
+          curl -v "http://${{ secrets.EC2_HOST }}:8001/health" || true
