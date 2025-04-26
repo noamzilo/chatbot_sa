@@ -1,0 +1,80 @@
+name: Deploy Infrastructure Services
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'db/**'
+      - 'docker-compose.yml'
+      - '.github/workflows/deploy-infrastructure.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-20.04
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Decode EC2 SSH key
+        run: |
+          echo "${{ secrets.EC2_SSH_KEY_B64 }}" | base64 -d > /tmp/chatbot_sa_key.pem
+          chmod 600 /tmp/chatbot_sa_key.pem
+
+      - uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ secrets.AWS_REGION }}
+
+      - name: Install AWS CLI
+        run: |
+          curl -sSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
+          unzip -q awscliv2.zip
+          sudo ./aws/install --update
+
+      - name: Log in to Amazon ECR
+        run: |
+          aws ecr get-login-password | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
+
+      - name: Prepare EC2 folder
+        run: |
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "sudo mkdir -p /home/${{ secrets.EC2_USER }}/chatbot_sa && \
+             sudo chown -R ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /home/${{ secrets.EC2_USER }}/chatbot_sa"
+
+      - name: Upload docker-compose.yml
+        run: |
+          scp -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            docker-compose.yml \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/chatbot_sa/docker-compose.yml
+
+      - name: Upload .env
+        run: |
+          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" > /tmp/remote.env
+          scp -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            /tmp/remote.env \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/chatbot_sa/.env
+
+      - name: Ensure Docker Compose on EC2
+        run: |
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            'if ! command -v docker-compose >/dev/null || [ "$(docker-compose version --short)" != "2.20.2" ]; then
+               sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64" \
+                 -o /usr/local/bin/docker-compose && sudo chmod +x /usr/local/bin/docker-compose;
+             fi'
+
+      - name: Deploy infrastructure services
+        run: |
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "cd /home/${{ secrets.EC2_USER }}/chatbot_sa && \
+             aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }} && \
+             docker-compose pull db redis && \
+             docker-compose up -d db redis"
+
+      - name: Verify deployment
+        run: |
+          ssh -i /tmp/chatbot_sa_key.pem -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "docker ps | grep -E 'db|redis'" 

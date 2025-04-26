@@ -47,6 +47,16 @@ python crawler.py
 run act
 cd ~/src/chatbot_sa && \
 act -j deploy --secret-file /home/noams/src/chatbot_sa/.env
+# Test bot deployment
+act -j deploy -W .github/workflows/deploy-bot.yml --secret-file .env
+# Test crawlers deployment
+act -j deploy -W .github/workflows/deploy-crawlers.yml --secret-file .env
+# Test RAG API deployment
+act -j deploy -W .github/workflows/deploy-rag-api.yml --secret-file .env
+# Test infrastructure deployment
+act -j deploy -W .github/workflows/deploy-infrastructure.yml --secret-file .env
+
+
 
 Connect to db
 set -a; source /home/noams/src/chatbot_sa/.env; set +a; docker exec -it vector_db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
